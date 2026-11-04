@@ -1,0 +1,771 @@
+﻿//! 持久化与状态模型。
+//!
+//! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），但默认目录
+//! 用独立的 `%APPDATA%\Daozai`，避免与原工具的 `%APPDATA%\Nusa` 互相覆盖：
+//!   %APPDATA%\Daozai\settings.txt   -> pet=0/1, minimal=0/1
+//!   %APPDATA%\Daozai\todo.txt
+//!   %APPDATA%\Daozai\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
+//!   %APPDATA%\Daozai\shelf.txt      -> 置物清单（每行一个绝对路径）
+//!
+//! 设置环境变量 `DAOZAI_DATA_DIR` 可把以上目录整体改到别处（用于与已安装的
+//! 原工具并存、或跑测试时不碰真实数据）。
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use chrono::Datelike;
+
+fn env_dir(key: &str) -> PathBuf {
+    PathBuf::from(std::env::var(key).unwrap_or_else(|_| ".".into()))
+}
+
+pub fn config_dir() -> PathBuf {
+    if let Ok(root) = std::env::var("DAOZAI_DATA_DIR") {
+        return PathBuf::from(root);
+    }
+    env_dir("APPDATA").join("Daozai")
+}
+
+fn read_kv(path: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Ok(text) = fs::read_to_string(path) {
+        for line in text.trim_start_matches('\u{feff}').lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                out.push((k.trim().to_string(), v.trim().to_string()));
+            }
+        }
+    }
+    out
+}
+
+fn write_kv(path: &Path, pairs: &[(String, String)]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let body: String = pairs
+        .iter()
+        .map(|(k, v)| format!("{k}={v}\n"))
+        .collect();
+    atomic_write(path, body.as_bytes())
+}
+
+pub(crate) fn atomic_write(path:&Path,body:&[u8])->std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64,Ordering};
+    static SERIAL:AtomicU64=AtomicU64::new(0);
+    let (tmp,mut file)=loop {
+        let mut name=path.file_name().ok_or_else(||std::io::Error::other("缺少文件名"))?.to_os_string();
+        name.push(format!(".{}-{}.tmp",std::process::id(),SERIAL.fetch_add(1,Ordering::Relaxed)));
+        let tmp=path.with_file_name(name);
+        match fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(file)=>break (tmp,file),
+            Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,
+            Err(e)=>return Err(e),
+        }
+    };
+    let result=file.write_all(body).and_then(|_|file.sync_all());
+    drop(file);
+    let result=result.and_then(|_|replace_file(&tmp,path));
+    if result.is_err(){let _=fs::remove_file(&tmp);}
+    result
+}
+
+fn replace_file(tmp:&Path,path:&Path)->std::io::Result<()> {
+    let result=fs::rename(tmp,path);
+    #[cfg(windows)]
+    if result.as_ref().is_err_and(|e|e.kind()==std::io::ErrorKind::CrossesDevices) {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{MoveFileExW,MOVEFILE_COPY_ALLOWED,MOVEFILE_REPLACE_EXISTING,MOVEFILE_WRITE_THROUGH};
+        // Windows 目录映射可能将同目录替换报告为跨卷，交给系统复制并替换。
+        let source:Vec<u16>=tmp.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target:Vec<u16>=path.as_os_str().encode_wide().chain(Some(0)).collect();
+        return unsafe{MoveFileExW(PCWSTR(source.as_ptr()),PCWSTR(target.as_ptr()),MOVEFILE_REPLACE_EXISTING|MOVEFILE_COPY_ALLOWED|MOVEFILE_WRITE_THROUGH)}.map_err(std::io::Error::other);
+    }
+    result
+}
+
+/// 空闲（没有活动 / 通知 / 展开）时灵岛的呈现方式，用户可在设置里自选。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdleMode {
+    /// 带宠物和状态的黑条（默认，最像现在的行为）。
+    Bar,
+    /// 自动缩成一颗小药丸，像真机灵动岛收起时那样。
+    Pill,
+    /// 完全隐入顶部：空闲时窗口裁剪为空，鼠标靠近屏顶才温柔冒头。
+    Hidden,
+}
+impl IdleMode {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "pill" => Self::Pill,
+            "hidden" => Self::Hidden,
+            _ => Self::Bar,
+        }
+    }
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::Bar => "bar",
+            Self::Pill => "pill",
+            Self::Hidden => "hidden",
+        }
+    }
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Bar => "带宠物和状态的黑条",
+            Self::Pill => "自动小药丸",
+            Self::Hidden => "完全隐入",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub settings_theme: crate::settings_theme::SettingsTheme,
+    pub pet: bool,
+    /// 灵岛嘴巴：按表情切换（一条线 / 收成一个点），可关。
+    pub pet_mouth: bool,
+    /// 眼睛跟随鼠标的灵敏度倍率（0.3–2.5）。
+    pub pet_eye_speed: f32,
+    pub minimal: bool,
+    /// 自动避让总开关；开启后，指定应用/浏览器在前台且盖住岛的位置时收成细线。
+    pub browser_minimal: bool,
+    /// 选中的显示屏 stable id（空串 = 跟随主屏）。多显示器时岛体贴在该屏顶部中央。
+    pub display_id: String,
+    /// 自动避让：常见浏览器（Chrome/Edge/夸克等）自动识别。
+    pub avoid_browsers: bool,
+    /// 自动避让：用户自定义的应用（exe 全路径, 显示名）。
+    pub avoid_apps: Vec<(String, String)>,
+    pub visible_pages: [bool; 8],
+    pub page_order: [usize; 8],
+    pub show_battery: bool,
+    pub resident_order: Vec<usize>,
+    pub system_hud: bool,
+    pub read_notifications:bool,
+    pub notifications: bool,
+    /// 通知隐私：是否在岛上显示通知正文（默认关，屏幕共享时更安全）。
+    pub notification_preview: bool,
+    pub sound: bool,
+    pub lyrics_enabled:bool,
+    pub island_lyrics:bool,
+    pub lyric_delay_ms:i32,
+    pub hide_fullscreen: bool,
+    pub focus_minutes: u32,
+    pub rest_minutes: u32,
+    pub water_minutes: u32,
+    pub serving_ml: u32,
+    pub water_start: u32,
+    pub water_end: u32,
+    /// v0.5.5 邮件提醒：总开关、验证码高亮、轮询间隔（秒）、会议提前量（分钟）。
+    pub mail_enabled: bool,
+    pub mail_code: bool,
+    /// 验证码是否自动遮罩。
+    pub mail_code_hide: bool,
+    /// 验证码在邮件页可见多少秒后遮罩（点一下可临时显示）。
+    pub mail_code_hide_seconds: u32,
+    pub mail_interval: u32,
+    pub mail_ics: u32,
+    pub ignored_mail_events: Vec<String>,
+    /// v0.5.6 日程：还没配置时在岛上给一次「接入飞书日历」的提示；
+    /// 用户点开设置或关掉后置 false，不再弹。
+    pub calendar_prompt: bool,
+    pub calendar_auto_sync: bool,
+    /// 外观：主色（`#RRGGBB`，空串表示默认蓝）与界面缩放（0.8~1.5）。
+    pub accent: String,
+    pub ui_zoom: f32,
+    /// 深度媒体集成：读取网易云等客户端的进程内存拿进度。
+    /// 关掉后只走 Windows 媒体会话（SMTC），兼容性下降但不碰别的进程。
+    pub media_deep: bool,
+    /// 久坐提醒：连续活跃若干分钟后提示起身。
+    pub sit_remind: bool,
+    pub sit_minutes: u32,
+    /// 复制验证码后自动清空剪贴板（秒，0 = 不清）。
+    pub clip_clear_secs: u32,
+    /// 平时隐藏：只留一条极细的提示线，来消息/状态变化时才自动弹出。
+    pub auto_hide: bool,
+    /// 极细提示线在无内容时的高度（逻辑点）。
+    pub auto_hide_slim: f32,
+    /// 全局快捷键（"off" 表示不绑定）。
+    pub hotkey_hide: String,
+    pub hotkey_minimal: String,
+    /// 灵动岛：深夜自动变暗（22:30–07:30），不刺眼。
+    pub night_mode: bool,
+    /// 灵动岛：检测到会议 / 投屏软件时自动勿扰（不自动弹出，只留小圆）。
+    pub dnd_meeting: bool,
+    /// 灵动岛：鼠标靠近屏顶或悬停胶囊时轻微放大预览（peek）。
+    pub peek_enabled: bool,
+    /// 空闲（无活动 / 通知 / 展开）时灵岛的呈现：自动小药丸 / 带状态的黑条 / 完全隐入。
+    pub idle_mode: IdleMode,
+    /// 鼠标离开岛体后，等待多少秒才自动收起（0.5–10 秒）。
+    pub leave_delay: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, display_id: String::new(), avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, resident_order: Vec::new(), system_hud: true, read_notifications:false, notifications: true, notification_preview: false, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: true, mail_code_hide_seconds: 60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, accent: String::new(), ui_zoom: 1.0, media_deep: true, sit_remind: true, sit_minutes: 50, clip_clear_secs: 30, auto_hide: false, auto_hide_slim: 4.5, hotkey_hide: "off".into(), hotkey_minimal: "off".into(), night_mode: true, dnd_meeting: true, peek_enabled: true, idle_mode: IdleMode::Bar, leave_delay: 3.0 }
+    }
+}
+
+/// 可选全局快捷键。只允许白名单，配置文件被改坏时回落到「不绑定」。
+pub fn hotkey_keys() -> [(&'static str, &'static str); 5] {
+    [
+        ("off", "不绑定"),
+        ("ctrl_alt_d", "Ctrl + Alt + D"),
+        ("ctrl_alt_m", "Ctrl + Alt + M"),
+        ("ctrl_alt_space", "Ctrl + Alt + 空格"),
+        ("alt_shift_d", "Alt + Shift + D"),
+    ]
+}
+
+pub fn hotkey(value: &str) -> String {
+    hotkey_keys()
+        .iter()
+        .find(|(key, _)| *key == value)
+        .map(|(key, _)| (*key).to_string())
+        .unwrap_or_else(|| "off".to_string())
+}
+
+impl Settings {
+    pub fn load() -> Self {
+        let mut s = Self::default();
+        for (k, v) in read_kv(&config_dir().join("settings.txt")) {
+            match k.as_str() {
+                "settings_theme" => s.settings_theme=crate::settings_theme::SettingsTheme::parse(&v),
+                "pet" => s.pet = v == "1" || v.eq_ignore_ascii_case("true"),
+                "pet_mouth" => s.pet_mouth = v != "0",
+                "pet_eye_speed" => s.pet_eye_speed = v.parse::<f32>().unwrap_or(1.0).clamp(0.3, 2.5),
+                "minimal" => s.minimal = v == "1" || v.eq_ignore_ascii_case("true"),
+                "browser_minimal" => s.browser_minimal = v == "1",
+                "display_id" => s.display_id = v,
+                "avoid_browsers" => s.avoid_browsers = v != "0",
+                "avoid_apps" => s.avoid_apps = serde_json::from_str(&v).unwrap_or_default(),
+                "resident_order" => {
+                    let order:Vec<usize>=v.split(',').filter_map(|n|n.parse().ok()).collect();
+                    if crate::bar_layout::valid_order(&order){s.resident_order=order;}
+                }
+                "page_order" => {
+                    if let Ok(order)=v.split(',').map(str::parse::<usize>).collect::<Result<Vec<_>,_>>() {
+                        if order.len()==8 && (0..8).all(|page|order.contains(&page)) {
+                            s.page_order.copy_from_slice(&order);
+                        }
+                    }
+                }
+                "show_battery" => s.show_battery = v != "0",
+                "visible_pages" if (6..=8).contains(&v.len()) && v.bytes().all(|b| b==b'0' || b==b'1') => {
+                    for (enabled,value) in s.visible_pages.iter_mut().zip(v.bytes()) { *enabled=value==b'1'; }
+                    for enabled in &mut s.visible_pages[v.len()..]{*enabled=v.bytes().any(|b|b==b'1');}
+                }
+                "read_notifications" => s.read_notifications=v=="1",
+                "system_hud" => s.system_hud = v != "0",
+                "notifications" => s.notifications = v != "0",
+                "notification_preview" => s.notification_preview = v == "1",
+                "sound" => s.sound = v == "1",
+                "lyrics_enabled" => s.lyrics_enabled=v!="0",
+                "island_lyrics" => s.island_lyrics=v=="1",
+                "lyric_delay_ms" => s.lyric_delay_ms=v.parse::<i32>().unwrap_or(-350).clamp(-5000,5000),
+                "hide_fullscreen" => s.hide_fullscreen = v != "0",
+                "focus_minutes" => s.focus_minutes = v.parse::<u32>().unwrap_or(25).clamp(1, 180),
+                "rest_minutes" | "short_minutes" => s.rest_minutes = v.parse::<u32>().unwrap_or(5).clamp(1, 60),
+                "water_minutes" => s.water_minutes = v.parse::<u32>().unwrap_or(45).clamp(5, 180),
+                "serving_ml" => s.serving_ml = v.parse::<u32>().unwrap_or(250).clamp(50, 1000),
+                "water_start" => s.water_start = v.parse::<u32>().unwrap_or(9).min(23),
+                "water_end" => s.water_end = v.parse::<u32>().unwrap_or(22).min(24),
+                "mail_enabled" => s.mail_enabled = v != "0",
+                "mail_code" => s.mail_code = v != "0",
+                "mail_code_hide" => s.mail_code_hide = v != "0",
+                "mail_code_hide_seconds" => s.mail_code_hide_seconds = v.parse::<u32>().unwrap_or(60).clamp(15, 300),
+                "mail_interval" => s.mail_interval = match v.parse::<u32>().unwrap_or(120) { 60 => 60, 300 => 300, _ => 120 },
+                "ignored_mail_events" => s.ignored_mail_events = serde_json::from_str(&v).unwrap_or_default(),
+                "mail_ics" => s.mail_ics = match v.parse::<u32>().unwrap_or(15) { 5 => 5, 30 => 30, _ => 15 },
+                "calendar_prompt" => s.calendar_prompt = v != "0",
+                "calendar_auto_sync" => s.calendar_auto_sync = v != "0",
+                "accent" => s.accent = if crate::theme::parse_hex(&v).is_some() { v } else { String::new() },
+                "ui_zoom" => s.ui_zoom = v.parse::<f32>().unwrap_or(1.0).clamp(0.75, 1.5),
+                "media_deep" => s.media_deep = v != "0",
+                "sit_remind" => s.sit_remind = v != "0",
+                "sit_minutes" => s.sit_minutes = v.parse().unwrap_or(50).clamp(20, 180),
+                "clip_clear_secs" => s.clip_clear_secs = v.parse().unwrap_or(30).min(300),
+                "auto_hide" => s.auto_hide = v == "1",
+                "auto_hide_slim" => s.auto_hide_slim = v.parse::<f32>().unwrap_or(4.5).clamp(2.0, 20.0),
+                "hotkey_hide" => s.hotkey_hide = hotkey(&v),
+                "hotkey_minimal" => s.hotkey_minimal = hotkey(&v),
+                "night_mode" => s.night_mode = v == "1" || v.eq_ignore_ascii_case("true"),
+                "dnd_meeting" => s.dnd_meeting = v == "1" || v.eq_ignore_ascii_case("true"),
+                "peek_enabled" => s.peek_enabled = v == "1" || v.eq_ignore_ascii_case("true"),
+                "idle_mode" => s.idle_mode = IdleMode::parse(&v),
+                "leave_delay" => s.leave_delay = v.parse::<f32>().unwrap_or(3.0).clamp(0.5, 10.0),
+                _ => {}
+            }
+        }
+        if !s.visible_pages.contains(&true) { s.visible_pages[0]=true; }
+        s
+    }
+
+    pub fn save(&self) {
+        let _ = write_kv(
+            &config_dir().join("settings.txt"),
+            &[
+                ("settings_theme".into(),self.settings_theme.key().into()),
+                ("pet".into(), if self.pet { "1".to_string() } else { "0".to_string() }),
+                ("pet_mouth".into(), if self.pet_mouth { "1" } else { "0" }.into()),
+                ("pet_eye_speed".into(), format!("{:.2}", self.pet_eye_speed)),
+                ("minimal".into(), if self.minimal { "1".to_string() } else { "0".to_string() }),
+                ("browser_minimal".into(), (self.browser_minimal as u8).to_string()),
+                ("display_id".into(), self.display_id.clone()),
+                ("avoid_browsers".into(), (self.avoid_browsers as u8).to_string()),
+                ("avoid_apps".into(), serde_json::to_string(&self.avoid_apps).unwrap_or_default()),
+                ("visible_pages".into(), self.visible_pages.iter().map(|enabled|if *enabled {'1'}else{'0'}).collect()),
+                ("page_order".into(),self.page_order.iter().map(usize::to_string).collect::<Vec<_>>().join(",")),
+                ("resident_order".into(),self.resident_order.iter().map(usize::to_string).collect::<Vec<_>>().join(",")),
+                ("show_battery".into(), (self.show_battery as u8).to_string()),
+                ("read_notifications".into(),(self.read_notifications as u8).to_string()),
+                ("system_hud".into(), (self.system_hud as u8).to_string()),
+                ("notifications".into(), (self.notifications as u8).to_string()),
+                ("notification_preview".into(), (self.notification_preview as u8).to_string()),
+                ("sound".into(), (self.sound as u8).to_string()),
+                ("lyrics_enabled".into(),(self.lyrics_enabled as u8).to_string()),
+                ("island_lyrics".into(),(self.island_lyrics as u8).to_string()),
+                ("lyric_delay_ms".into(),self.lyric_delay_ms.to_string()),
+                ("hide_fullscreen".into(), (self.hide_fullscreen as u8).to_string()),
+                ("focus_minutes".into(), self.focus_minutes.to_string()),
+                ("rest_minutes".into(), self.rest_minutes.to_string()),
+                ("water_minutes".into(), self.water_minutes.to_string()),
+                ("serving_ml".into(), self.serving_ml.to_string()),
+                ("water_start".into(), self.water_start.to_string()),
+                ("water_end".into(), self.water_end.to_string()),
+                ("mail_enabled".into(), (self.mail_enabled as u8).to_string()),
+                ("mail_code".into(), (self.mail_code as u8).to_string()),
+                ("mail_code_hide".into(), if self.mail_code_hide { "1" } else { "0" }.into()),
+                ("mail_code_hide_seconds".into(), self.mail_code_hide_seconds.to_string()),
+                ("mail_interval".into(), self.mail_interval.to_string()),
+                ("mail_ics".into(), self.mail_ics.to_string()),
+                ("ignored_mail_events".into(), serde_json::to_string(&self.ignored_mail_events).unwrap()),
+                ("calendar_prompt".into(), (self.calendar_prompt as u8).to_string()),
+                ("calendar_auto_sync".into(), (self.calendar_auto_sync as u8).to_string()),
+                ("accent".into(), self.accent.clone()),
+                ("ui_zoom".into(), format!("{:.2}", self.ui_zoom)),
+                ("media_deep".into(), (self.media_deep as u8).to_string()),
+                ("sit_remind".into(), (self.sit_remind as u8).to_string()),
+                ("sit_minutes".into(), self.sit_minutes.to_string()),
+                ("clip_clear_secs".into(), self.clip_clear_secs.to_string()),
+                ("auto_hide".into(), (self.auto_hide as u8).to_string()),
+                ("auto_hide_slim".into(), format!("{:.1}", self.auto_hide_slim)),
+                ("hotkey_hide".into(), self.hotkey_hide.clone()),
+                ("hotkey_minimal".into(), self.hotkey_minimal.clone()),
+                ("night_mode".into(), if self.night_mode { "1" } else { "0" }.into()),
+                ("dnd_meeting".into(), if self.dnd_meeting { "1" } else { "0" }.into()),
+                ("peek_enabled".into(), if self.peek_enabled { "1" } else { "0" }.into()),
+                ("idle_mode".into(), self.idle_mode.key().into()),
+                ("leave_delay".into(), format!("{:.1}", self.leave_delay)),
+            ],
+        );
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TodoItem {
+    pub text: String,
+    pub done_on: Option<String>, // YYYY-MM-DD
+    pub due: Option<String>, // 本地日期与时间：YYYY-MM-DD HH:MM
+    pub reminded: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TodoList {
+    pub items: Vec<TodoItem>,
+}
+
+impl TodoList {
+    pub fn load() -> Self {
+        let path = config_dir().join("todo.txt");
+        let mut list = Self::default();
+        if let Ok(text) = fs::read_to_string(path) {
+            for line in text.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // 格式：<x 或 o>|<完成日期或 ->|正文；也接受纯文本行（视为未完成）
+                if !line.contains('|') {
+                    list.items.push(TodoItem { text: line.trim().to_string(), done_on: None, due: None, reminded: false });
+                    continue;
+                }
+                let mut parts = line.splitn(3, '|');
+                let flag = parts.next().unwrap_or("o");
+                let when = parts.next().unwrap_or("-");
+                let raw = parts.next().unwrap_or("").trim();
+                let (due, reminded, text) = if let Some(rest) = raw.strip_prefix("@due:") {
+                    let mut fields = rest.splitn(3, '|');
+                    let due = fields.next().unwrap_or("").to_string();
+                    let reminded = fields.next() == Some("1");
+                    (Some(due), reminded, fields.next().unwrap_or("").to_string())
+                } else { (None, false, raw.to_string()) };
+                if text.is_empty() {
+                    continue;
+                }
+                list.items.push(TodoItem {
+                    text, due, reminded,
+                    done_on: if flag == "x" && when != "-" {
+                        Some(when.to_string())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+        list
+    }
+
+    pub fn save(&self) {
+        let body: String = self
+            .items
+            .iter()
+            .map(|i| {
+                let state = i.done_on.as_ref().map(|d| format!("x|{d}")).unwrap_or_else(|| "o|-".into());
+                let text = i.text.replace(['\n', '\r'], " ");
+                match &i.due {
+                    Some(due) => format!("{state}|@due:{due}|{}|{text}\n", i.reminded as u8),
+                    None => format!("{state}|{text}\n"),
+                }
+            })
+            .collect();
+        let path = config_dir().join("todo.txt");
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = atomic_write(&path, body.as_bytes());
+    }
+
+    pub fn done_today(&self, today: &str) -> usize {
+        self.items
+            .iter()
+            .filter(|i| i.done_on.as_deref() == Some(today))
+            .count()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Water {
+    pub bottle_ml: u32,
+    pub goal_ml: u32,
+    pub start_day: String,
+    pub drunk_ml: u32,
+    pub refills: u32,
+    /// 每小时饮水量（ml），给饮水页的柱状图用。
+    pub hours: [u32; 24],
+    /// 定时提醒开关。
+    pub remind: bool,
+}
+
+impl Default for Water {
+    fn default() -> Self {
+        Self { bottle_ml: 2000, goal_ml: 2000, start_day: String::new(), drunk_ml: 0, refills: 0, hours: [0; 24], remind: true }
+    }
+}
+
+impl Water {
+    /// `water.txt` 只写原工具已知的三个键；复刻版新增的进度键写到 `water-extra.txt`，
+    /// 避免给原工具的文件引入未知键。
+    pub fn load(today: &str) -> Self {
+        let mut w = Self::default();
+        for (k, v) in read_kv(&config_dir().join("water.txt")) {
+            match k.as_str() {
+                "bottle" => w.bottle_ml = v.parse::<f32>().map(|x| x as u32).unwrap_or(2000),
+                "goal" => w.goal_ml = v.parse().unwrap_or(2000),
+                "start" => w.start_day = v,
+                _ => {}
+            }
+        }
+        for (k, v) in read_kv(&config_dir().join("water-extra.txt")) {
+            match k.as_str() {
+                "drunk" => w.drunk_ml = v.parse().unwrap_or(0),
+                "refills" => w.refills = v.parse().unwrap_or(0),
+                "remind" => w.remind = v != "0",
+                "hours" => {
+                    for (i, x) in v.split(',').take(24).enumerate() {
+                        w.hours[i] = x.trim().parse().unwrap_or(0);
+                    }
+                }
+                _ => {}
+            }
+        }
+        w.goal_ml=w.goal_ml.clamp(500,6000);
+        w.bottle_ml=w.bottle_ml.clamp(50,6000);
+        if w.start_day != today {
+            // 跨天重置，与原工具 start= 字段语义一致
+            w.start_day = today.to_string();
+            w.drunk_ml = 0;
+            w.refills = 0;
+            w.hours = [0; 24];
+            w.save();
+        }
+        w
+    }
+
+    pub fn save(&self) {
+        let _ = write_kv(
+            &config_dir().join("water.txt"),
+            &[
+                ("bottle".into(), self.bottle_ml.to_string()),
+                ("goal".into(), self.goal_ml.to_string()),
+                ("start".into(), self.start_day.clone()),
+            ],
+        );
+        let _ = write_kv(
+            &config_dir().join("water-extra.txt"),
+            &[
+                ("drunk".into(), self.drunk_ml.to_string()),
+                ("refills".into(), self.refills.to_string()),
+                ("remind".into(), if self.remind { "1".into() } else { "0".into() }),
+                (
+                    "hours".into(),
+                    self.hours.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(","),
+                ),
+            ],
+        );
+    }
+
+    /// 喝一口：计入总量与当前小时。
+    pub fn drink(&mut self, ml: u32, hour: usize) {
+        let total=self.drunk_ml.saturating_add(ml).min(self.goal_ml.max(ml).saturating_mul(4));
+        let added=total.saturating_sub(self.drunk_ml);
+        self.drunk_ml=total;
+        self.hours[hour.min(23)]=self.hours[hour.min(23)].saturating_add(added);
+        self.save();
+    }
+
+    pub fn percent(&self) -> f32 {
+        if self.goal_ml == 0 {
+            0.0
+        } else {
+            (self.drunk_ml as f32 / self.goal_ml as f32 * 100.0).min(100.0)
+        }
+    }
+}
+
+/// 专注（番茄）完成记录：每个条目是完成那天的日期 `YYYY-MM-DD`。
+/// 只记专注阶段的完成，不记休息；用于「今日/本周完成数」统计。
+#[derive(Clone, Debug, Default)]
+pub struct PomoLog {
+    pub dates: Vec<String>,
+}
+
+impl PomoLog {
+    pub fn load() -> Self {
+        let mut s = Self::default();
+        if let Ok(text) = fs::read_to_string(config_dir().join("pomo-log.txt")) {
+            for line in text.lines() {
+                let d = line.trim();
+                if !d.is_empty() {
+                    s.dates.push(d.to_string());
+                }
+            }
+        }
+        s
+    }
+
+    /// 记一次专注完成。`today` 形如 `YYYY-MM-DD`。
+    pub fn push(&mut self, today: &str) {
+        self.dates.push(today.to_string());
+        let body: String = self.dates.iter().map(|d| format!("{d}\n")).collect();
+        let path = config_dir().join("pomo-log.txt");
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = atomic_write(&path, body.as_bytes());
+    }
+
+    /// 今日与本周完成数。周从周一开始。
+    pub fn counts(&self, today: &str) -> (usize, usize) {
+        let parse = |s: &str| {
+            let parts: Vec<u32> = s.split('-').filter_map(|x| x.parse::<u32>().ok()).collect();
+            if parts.len() != 3 { None } else { chrono::NaiveDate::from_ymd_opt(parts[0] as i32, parts[1], parts[2]) }
+        };
+        let Some(today_d) = parse(today) else { return (0, 0) };
+        let weekday = today_d.weekday().num_days_from_monday();
+        let week_start = today_d - chrono::Days::new(weekday as u64);
+        let week_end = week_start + chrono::Days::new(7);
+        let mut today_n = 0;
+        let mut week_n = 0;
+        for d in &self.dates {
+            if let Some(date) = parse(d) {
+                if date == today_d {
+                    today_n += 1;
+                }
+                if date >= week_start && date < week_end {
+                    week_n += 1;
+                }
+            }
+        }
+        (today_n, week_n)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Shelf {
+    pub items: Vec<PathBuf>,
+    /// 文本便签（手滑保存的剪贴板片段等），与文件分开存。
+    pub notes: Vec<String>,
+    /// 设置页里正在输入的新便签。
+    pub note_draft: String,
+    /// 置物架是否切换到文本便签视图。
+    pub notes_open: bool,
+}
+
+impl Shelf {
+    pub fn load() -> Self {
+        let mut s = Self::default();
+        if let Ok(text) = fs::read_to_string(config_dir().join("shelf.txt")) {
+            for line in text.lines() {
+                let p = PathBuf::from(line.trim());
+                if !line.trim().is_empty() && !s.items.contains(&p) {
+                    s.items.push(p);
+                }
+            }
+        }
+        if let Ok(text) = fs::read_to_string(config_dir().join("shelf-notes.txt")) {
+            for line in text.lines() {
+                if !line.trim().is_empty() {
+                    s.notes.push(line.to_string());
+                }
+            }
+        }
+        s
+    }
+
+    pub fn save(&self) {
+        let body: String = self
+            .items
+            .iter()
+            .map(|p| format!("{}\n", p.display()))
+            .collect();
+        let path = config_dir().join("shelf.txt");
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = atomic_write(&path, body.as_bytes());
+        let notes = self
+            .notes
+            .iter()
+            .map(|n| format!("{}\n", n))
+            .collect::<String>();
+        let _ = atomic_write(&config_dir().join("shelf-notes.txt"), notes.as_bytes());
+    }
+
+    /// 原工具的做法：记录文件所在位置，不复制文件本体（官网说明
+    /// "the shelf remembers where your files live"）。
+    pub fn add(&mut self, src: &Path) -> std::io::Result<()> {
+        if !src.exists() { return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "文件不存在")); }
+        if !self.items.iter().any(|p| p == src) {
+            self.items.push(src.to_path_buf());
+            self.save();
+        }
+        Ok(())
+    }
+
+    pub fn remove(&mut self, p: &Path) {
+        self.items.retain(|item| item != p);
+        self.save();
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.save();
+    }
+}
+
+pub fn human_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if b >= KB * KB * KB {
+        format!("{:.1} GB", b / (KB * KB * KB))
+    } else if b >= KB * KB {
+        format!("{:.1} MB", b / (KB * KB))
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_save_preserves_neighbor_and_cleans_failed_writes() {
+        let dir=std::env::temp_dir().join(format!("daozai-quality-save-{}",std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path=dir.join("settings.txt");let neighbor=dir.join("settings.tmp");
+        fs::write(&neighbor,b"other data").unwrap();
+        let saved=atomic_write(&path,b"settings");
+        let untouched=fs::read(&neighbor).ok()==Some(b"other data".to_vec());
+        let blocked=dir.join("blocked.txt");fs::create_dir_all(&blocked).unwrap();
+        assert!(atomic_write(&blocked,b"cannot replace directory").is_err());
+        let leftovers=fs::read_dir(&dir).unwrap().flatten().filter(|e|e.path()!=path && e.path()!=neighbor && e.path()!=blocked).count();
+        let failed_tmp=blocked.with_extension("tmp").exists();
+        for entry in fs::read_dir(&dir).unwrap().flatten(){if entry.file_type().unwrap().is_file(){fs::remove_file(entry.path()).unwrap();}}
+        fs::remove_dir(blocked).unwrap();fs::remove_dir(dir).unwrap();
+        assert!(saved.is_ok() && untouched,"保存不能覆盖或移走同名 .tmp 文件");
+        assert!(!failed_tmp && leftovers==0,"失败的保存应清除本次临时文件");
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_settings() {
+        let dir=std::env::temp_dir().join(format!("daozai-save-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        let path=dir.join("settings.txt");
+        atomic_write(&path,b"focus_minutes=25\n").unwrap();
+        atomic_write(&path,b"focus_minutes=26\n").unwrap();
+        assert_eq!(fs::read(&path).unwrap(),b"focus_minutes=26\n");
+        assert!(!path.with_extension("tmp").exists(),"保存后不应遗留临时配置");
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn quality_concurrent_saves_publish_one_complete_value() {
+        let dir=std::env::temp_dir().join(format!("daozai-quality-concurrent-{}",std::process::id()));fs::create_dir_all(&dir).unwrap();
+        let path=dir.join("cache.lrc");let gate=std::sync::Arc::new(std::sync::Barrier::new(4));
+        let workers:Vec<_>=(0..4u8).map(|byte|{let path=path.clone();let gate=gate.clone();std::thread::spawn(move||{gate.wait();atomic_write(&path,&vec![byte;128*1024])})}).collect();
+        for worker in workers{worker.join().unwrap().unwrap();}
+        let content=fs::read(&path).unwrap();assert_eq!(content.len(),128*1024);assert!(content.iter().all(|b|*b==content[0]));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(),1);fs::remove_file(path).unwrap();fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn human_size_formats_units() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1024), "1.0 KB");
+        assert_eq!(human_size(1536 * 1024), "1.5 MB");
+        assert_eq!(human_size(2 * 1024 * 1024 * 1024), "2.0 GB");
+    }
+
+    #[test]
+    fn water_percent_clamps_at_100() {
+        let w = Water { drunk_ml: 1000, ..Water::default() };
+        assert!((w.percent() - 50.0).abs() < 0.01);
+        let w = Water { drunk_ml: 5000, ..w };
+        assert!((w.percent() - 100.0).abs() < 0.01);
+    }
+}
+
+/// 仅保存应用标识与开关，不保存通知内容。
+#[derive(Clone,Debug,Default)]
+pub struct NotificationApps {pub items:Vec<(String,String,bool)>}
+impl NotificationApps {
+    pub fn load()->Self {
+        let path=config_dir().join("notification-apps.json");
+        let Ok(raw)=fs::read(path) else{return Self::default()};
+        let Ok(json)=serde_json::from_slice::<serde_json::Value>(&raw) else{return Self::default()};
+        let items=json.as_array().into_iter().flatten().filter_map(|a|Some((a.get("id")?.as_str()?.to_owned(),a.get("name")?.as_str()?.to_owned(),a.get("enabled")?.as_bool()?))).collect();Self{items}
+    }
+    pub fn save(&self){
+        let list:Vec<_>=self.items.iter().map(|(id,name,enabled)|serde_json::json!({"id":id,"name":name,"enabled":enabled})).collect();
+        let path=config_dir().join("notification-apps.json");if let Some(parent)=path.parent(){let _=fs::create_dir_all(parent);}if let Ok(data)=serde_json::to_vec(&list){let _=atomic_write(&path,&data);}
+    }
+    pub fn observe(&mut self,id:&str,name:&str)->bool{
+        if let Some(item)=self.items.iter().find(|a|a.0==id){return item.2;}
+        let enabled=true;
+        self.items.push((id.to_string(),name.to_string(),enabled));self.save();enabled
+    }
+}
