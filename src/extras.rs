@@ -704,12 +704,12 @@ pub(crate) fn setting_row(ui:&mut egui::Ui,title:&str,description:&str,value:&mu
         switch(ui,value);
     });
 }
-/// 三态选择行（水滴 / 带宠物和状态的黑条 / 完全隐入）。
+/// 三态选择行（圆点 / 带宠物和状态的黑条 / 完全隐入）。
 pub(crate) fn setting_idle_row(ui:&mut egui::Ui, value:&mut crate::model::IdleMode) {
     let ctx=ui.ctx().clone();
     ui.vertical(|ui|{
         ui.label(egui::RichText::new("空闲时显示").size(13.0).color(settings_color(&ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
-        ui.label(egui::RichText::new("没有活动时灵岛的样子；「水滴」会先收成小药丸、再像水滴一样融入顶部。鼠标贴近屏顶会临时冒头，方便随时唤起")
+        ui.label(egui::RichText::new("没有活动时灵岛的样子；「圆点」会收成一颗贴屏顶的小黑丸，再向上被屏顶吸进去。鼠标贴近屏顶会临时冒头，方便随时唤起")
             .size(11.5).color(settings_color(&ctx,Color32::from_gray(195),Color32::from_gray(60))));
         ui.add_space(4.0);
         egui::Frame::new()

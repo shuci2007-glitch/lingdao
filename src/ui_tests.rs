@@ -259,6 +259,7 @@ struct H {
     hit:Rect,
     animating:bool,
     shapes:Vec<egui::epaint::ClippedShape>,
+    tex:egui::TexturesDelta,
     bt: Vec<crate::bt::Device>,
     media: crate::smtc::NowPlaying,
     power: (Option<u8>, bool),
@@ -279,7 +280,7 @@ impl H {
         // 测试里用较短的离开延时，保留原有"离开即收起"的机制测试；
         // 生产默认 3 秒（settings.leave_delay）。
         app.settings.leave_delay = 0.12;
-        Self { ctx, app, t: 0.0, cursor: None,cmds:vec![],region:Rect::NOTHING,hit:Rect::NOTHING,animating:false,shapes:Vec::new(), bt:Vec::new(),media:Default::default(),power:(None,false),network:None,system_idle:None,browser_at_top:None,file_drop_zone:None,hovered_files:vec![],dropped_files:vec![] }
+        Self { ctx, app, t: 0.0, cursor: None,cmds:vec![],region:Rect::NOTHING,hit:Rect::NOTHING,animating:false,shapes:Vec::new(),tex:Default::default(), bt:Vec::new(),media:Default::default(),power:(None,false),network:None,system_idle:None,browser_at_top:None,file_drop_zone:None,hovered_files:vec![],dropped_files:vec![] }
     }
     fn frame(&mut self, events: Vec<egui::Event>) {
         self.t += 1.0 / 60.0;
@@ -320,6 +321,7 @@ impl H {
                 let frame=app.frame(ui, win, &env);*region=frame.region;*hit=frame.hit;*animating=frame.animating;*file_drop_zone=frame.file_drop_zone;cmds.extend(frame.cmds);
             });
         });
+        self.tex=output.textures_delta;
         self.shapes=output.shapes;
     }
     fn hover(&mut self, p: Pos2, secs: f64) {
@@ -989,10 +991,11 @@ fn island_lyrics_layout_gallery(){
                 egui::CentralPanel::default().frame(egui::Frame::new()).show(ctx,|ui|{let win=ui.max_rect();h.app.frame(ui,win,&env);});
             });
             raster.update_textures(&output.textures_delta);
+            let mut rgba=Vec::new();
             if frame==89 {
                 raster.buf.fill([0.95,0.96,0.98,1.0]);
                 raster.draw(&h.ctx.tessellate(output.shapes,output.pixels_per_point),output.pixels_per_point);
-                let mut rgba=Vec::new();raster.to_rgba8(&mut rgba);
+            raster.to_rgba8(&mut rgba);
                 let image=image::RgbaImage::from_raw(1280,380,rgba).unwrap();
                 image::imageops::crop_imm(&image,300,0,680,170).to_image().save(dest.join(format!("{name}.png"))).unwrap();
             }
@@ -3576,4 +3579,53 @@ fn mail_delete_and_clear_only_touch_the_local_list() {
     mail.clear();
     assert!(mail.recent.is_empty());
     assert!(mail.open_uid.is_none());
+}
+
+#[test]
+fn idle_drop_collapses_into_a_droplet_and_merges_into_the_top_edge() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
+    // 收束：直接收成一颗正圆小黑丸的尺寸，不再停在 116×13 的扁药丸。
+    for _ in 0..90 { h.frame(vec![]); }
+    assert!(h.app.current_width() < 40.0, "应直接收束成圆点，实际 {}", h.app.current_width());
+
+    // 融入：继续跑，进度推到 1，整颗圆点被屏顶吸走（绘制时整体上移出 top）。
+    for _ in 0..180 { h.frame(vec![]); }
+    assert!(h.app.drop_progress() > 0.95, "应融入屏顶，实际进度 {}", h.app.drop_progress());
+
+    // 光标贴近屏顶：圆点重新出现，恢复可交互。
+    h.cursor=Some(Pos2::new(320.0,8.0));
+    for _ in 0..60 { h.frame(vec![]); }
+    assert!(h.app.drop_progress() < 0.2, "贴顶后应回落，实际 {}", h.app.drop_progress());
+}
+
+/// 调试用：把「圆点」动画的若干帧软光栅化成 PPM，肉眼确认它真的被屏顶吸走。
+/// 默认 ignore；需要时 `cargo test --lib dump_drop_frames -- --ignored --nocapture`。
+#[test]
+#[ignore]
+fn dump_drop_frames() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
+    let w=crate::app::CANVAS_W as usize; let hh=crate::app::WIN_H as usize;
+    let mut r=crate::preview_raster::Raster::new(w,hh);
+    let ppp=h.ctx.pixels_per_point();
+    for i in 0..100 {
+        h.frame(vec![]);
+        if [10usize,20,28,38,48,58,68,80].contains(&i) {
+            let prims=h.ctx.tessellate(h.shapes.clone(),ppp);
+            r.update_textures(&h.tex);
+            r.draw(&prims,ppp);
+            r.free_textures(&h.tex);
+            let mut out=format!("P6\n{} {}\n255\n",w,hh).into_bytes();
+            for px in &r.buf {
+                let a=px[3].clamp(0.0,1.0); let bg=238.0f32;
+                for c in 0..3 { out.push((px[c]*255.0+bg*(1.0-a)).clamp(0.0,255.0) as u8); }
+            }
+            std::fs::write(format!("drop_{i:03}.ppm"),out).unwrap();
+            for px in &mut r.buf { *px=[0.0;4]; }
+            println!("frame {i}: drop={:.3} region_w={:.1}",h.app.drop_progress(),h.region.width());
+        }
+    }
 }

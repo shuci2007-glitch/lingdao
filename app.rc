@@ -17,8 +17,8 @@ BEGIN
             VALUE "InternalName", "Daozai"
             VALUE "OriginalFilename", "daozai.exe"
             VALUE "ProductName", "灵岛 Lingdao"
-            VALUE "ProductVersion", "0.6.53"
-            VALUE "FileVersion", "0.6.53"
+            VALUE "ProductVersion", "0.6.54"
+            VALUE "FileVersion", "0.6.54"
         END
     END
     BLOCK "VarFileInfo"

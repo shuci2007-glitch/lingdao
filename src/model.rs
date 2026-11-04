@@ -117,7 +117,7 @@ fn replace_file(tmp:&Path,path:&Path)->std::io::Result<()> {
 pub enum IdleMode {
     /// 带宠物和状态的黑条（默认，最像现在的行为）。
     Bar,
-    /// 水滴：灵动岛收束时先收成小药丸，再像水滴一样融入顶部（带动画）。
+    /// 圆点：灵动岛收束成一颗贴屏顶的正圆小黑丸，再向上被顶部吸进去（带动画）。
     Drop,
     /// 完全隐入顶部：空闲时窗口裁剪为空，鼠标靠近屏顶才温柔冒头。
     Hidden,
@@ -140,7 +140,7 @@ impl IdleMode {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Bar => "带宠物和状态的黑条",
-            Self::Drop => "水滴（收束后融入顶部）",
+            Self::Drop => "圆点（融入顶部）",
             Self::Hidden => "完全隐入",
         }
     }
@@ -221,7 +221,7 @@ pub struct Settings {
     pub dnd_meeting: bool,
     /// 灵动岛：鼠标靠近屏顶或悬停胶囊时轻微放大预览（peek）。
     pub peek_enabled: bool,
-    /// 空闲（无活动 / 通知 / 展开）时灵岛的呈现：水滴 / 带状态的黑条 / 完全隐入。
+    /// 空闲（无活动 / 通知 / 展开）时灵岛的呈现：圆点 / 带状态的黑条 / 完全隐入。
     pub idle_mode: IdleMode,
     /// 鼠标离开岛体后，等待多少秒才自动收起（0.5–10 秒）。
     pub leave_delay: f32,

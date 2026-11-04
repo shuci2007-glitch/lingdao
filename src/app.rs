@@ -34,12 +34,9 @@ pub(crate) const HUD_TRACK_X: f32 = 48.0;
 pub(crate) const HUD_TRACK_W: f32 = 150.0;
 pub const BAR_W_MIN: f32 = 44.0; // 极简小条
 pub const BAR_H_MIN: f32 = 4.5;
-/// 空闲小药丸：比手动极简的细线更饱满，像真机灵动岛收起时那颗黑丸。
-pub const IDLE_PILL_W: f32 = 116.0;
-pub const IDLE_PILL_H: f32 = 13.0;
-/// 「水滴」形态收束到底时的尺寸：一颗小水珠贴在屏顶中央，像融入顶部。
-pub const IDLE_DROP_W: f32 = 14.0;
-pub const IDLE_DROP_H: f32 = 11.0;
+/// 「圆点」形态：岛收束成一颗正圆小黑丸贴在屏顶中央，再被顶部吸进去。
+pub const IDLE_DROP_W: f32 = 18.0;
+pub const IDLE_DROP_H: f32 = 18.0;
 /// 灵动岛当前应呈现的形态（单一判定入口）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Present { Bar, Pill, Hidden }
@@ -502,7 +499,7 @@ pub struct App {
     near_top_now: bool,
     /// 在设置里切换空闲形态后，强制预览到该时刻，确保立刻可见。
     idle_preview_until: f64,
-    /// 「水滴」形态：收成小药丸后继续像水滴一样融入顶部的进度（0=药丸，1=完全融入）。
+    /// 「圆点」形态：收成小黑丸后被屏顶吸进去的进度（0=完整圆点，1=完全融入）。
     idle_drop: f32,
     /// 已播报过的活动签名，用来只在「新活动出现」时响一声。
     sound_sig: Vec<String>,
@@ -1224,6 +1221,8 @@ impl App {
     /// 切换空闲形态后强制预览（在设置里点选时调用）。
     pub(crate) fn preview_idle_mode(&mut self) {
         self.idle_preview_until = self.t + 5.0;
+        // 每次在设置里点选都从头播一遍：收成圆点 → 被屏顶吸进去，方便反复确认效果。
+        self.idle_drop = 0.0;
         // 手动「极简刘海」会覆盖「黑条」，切换时顺手关掉，避免用户以为设置没生效。
         self.settings.minimal = false;
     }
@@ -1251,14 +1250,11 @@ impl App {
         } else if self.effective_minimal() && (self.previewing() || self.t >= self.notification_bell_until) {
             if self.thin_forced() {
                 (BAR_W_MIN, BAR_H_MIN)
-            } else if self.idle_pill() {
-                // 水滴：先收成小药丸，再随 idle_drop 收成一颗小水珠融入顶部。
-                let e = smoothstep(0.0, 1.0, self.idle_drop);
-                let w = IDLE_PILL_W + (IDLE_DROP_W - IDLE_PILL_W) * e;
-                let h = IDLE_PILL_H + (IDLE_DROP_H - IDLE_PILL_H) * e;
-                (w, h)
             } else {
-                (IDLE_PILL_W, IDLE_PILL_H)
+                // 圆点：收束直接落到正圆小黑丸（不经过扁药丸），随后被屏顶吸走。
+                let e = smoothstep(0.0, 1.0, self.idle_drop);
+                let s = 1.0 - 0.22 * e;
+                (IDLE_DROP_W * s, IDLE_DROP_H * s)
             }
         } else {
             (self.resident.target.width, BAR_H)
@@ -1268,6 +1264,10 @@ impl App {
     /// 0 = 药丸，1 = 完整面板（展开时可略超过 1）。
     #[cfg(test)]
     pub(crate) fn current_width(&self) -> f32 { self.w.pos+self.notice_width.pos }
+
+    /// 圆点被屏顶吸走的进度：0 = 完整圆点，1 = 已完全融入屏顶。
+    #[cfg(test)]
+    pub(crate) fn drop_progress(&self) -> f32 { self.idle_drop }
 
     pub fn progress(&self) -> f32 {
         let (_, bh) = self.base_size();
@@ -1646,7 +1646,10 @@ impl App {
         // 平时隐藏：鼠标扫过不展开，只认通知到期时间（forced_open_until）和主动点击。
         // 会议 / 投屏勿扰时也不自动弹出，只留小圆。
         // 「完全隐入」模式鼠标贴顶时冒头，属于用户的主动靠近，即便开了「平时隐藏」也允许悬停展开。
-        let idle_popup = self.settings.idle_mode == model::IdleMode::Hidden && self.near_top_now && !self.open;
+        // 完全隐入 / 圆点：鼠标贴顶时冒头，属于用户主动靠近，允许悬停展开。
+        let idle_popup = matches!(self.settings.idle_mode, model::IdleMode::Hidden | model::IdleMode::Drop)
+            && self.near_top_now
+            && !self.open;
         let hover_opens = (!self.settings.auto_hide || self.t < self.forced_open_until || idle_popup) && !self.dnd_now;
         // 长按快捷操作进行中（按下未松开，或菜单已弹出）时，不要同时把面板也展开，
         // 否则长按会既弹菜单又开面板，体验冲突。
@@ -1661,11 +1664,25 @@ impl App {
             || self.drag_hot
             || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
-        // 「水滴」融入动画：先收成小药丸、弹簧落定后，再缓缓收成小水珠融入顶部。
-        // 预览期间停在药丸态，方便用户在设置里看清选中的形态。
-        let settled = self.w.pos < IDLE_PILL_W + 4.0 && self.h.pos < IDLE_PILL_H + 4.0;
-        let drop_target = if !self.previewing() && self.idle_pill() && settled { 1.0 } else { 0.0 };
-        self.idle_drop = anim::approach(self.idle_drop, drop_target, 2.6, dt);
+        // 「圆点」融入顶部：岛先收束成一颗正圆小黑丸（宽度收到圆点量级即算落定），
+        // 随后 idle_drop 0→1 把它向上吸进屏顶。开始之后一定播完，
+        // 只有完全融入（=1）且光标贴近屏顶时才回落，让圆点重新出现供交互。
+        let collapsed = self.w.pos < IDLE_DROP_W + 12.0 && self.h.pos < IDLE_DROP_H + 14.0;
+        let merged = self.idle_drop >= 0.995;
+        let drop_target = if !self.idle_pill() || !collapsed {
+            0.0
+        } else if merged && self.near_top_now {
+            0.0
+        } else {
+            1.0
+        };
+        // 线性推进：收束完成后先让圆点完整挂住约 0.35s，再用约 0.8s 被顶部吸走。
+        // 到 1 之后要稳住，别因 target==pos 掉进回落分支来回振荡。
+        if drop_target >= 1.0 {
+            self.idle_drop = (self.idle_drop + dt / 1.15).min(1.0);
+        } else {
+            self.idle_drop = anim::approach(self.idle_drop, 0.0, 6.0, dt);
+        }
         // 展开瞬间：播放「啵」一声。
         if self.open && !self.was_open && self.settings.sound && !self.dnd_now {
             sfx::play(sfx::Sfx::Boop);
@@ -1676,29 +1693,40 @@ impl App {
         // ---------- 绘制 ----------
         let p = self.progress();
         let (w, h) = (self.w.pos, self.h.pos);
-        let panel0 = Rect::from_min_size(Pos2::new(cx - w / 2.0, top), Vec2::new(w, h));
-        let panel = Rect::from_center_size(panel0.center(), panel0.size() * (if self.open { 1.0 } else { 1.0 + 0.06 * self.peek.pos }));
-        let pc = anim::clamp01(p);
-        let painter = ui.painter_at(ui.max_rect().expand(40.0));
-        let feather = 1.0 / ctx.pixels_per_point();
         // 歌词 / 通知 / 铃铛期间不画成极简，保持内容可见；其余情况按 effective_minimal。
         let minimal_pill = self.effective_minimal()
             && !self.island_lyrics_active()
             && self.notice.is_none()
             && (self.previewing() || self.t >= self.notification_bell_until)
-            && pc < 0.02;
+            && p < 0.02;
+        // 圆点形态：只在宽度已经收到圆点量级时换成正圆（收束过程仍走胶囊过渡）。
+        let drop_visual = minimal_pill && self.idle_pill() && w < 26.0;
+        let de = if drop_visual { smoothstep(0.30, 1.0, self.idle_drop) } else { 0.0 };
+        // 被屏顶吸走：整颗圆点边收边向上平移，最后整颗越过 top 被窗口裁掉。
+        let sink = de * (h + 6.0);
+        let panel0 = Rect::from_min_size(Pos2::new(cx - w / 2.0, top - sink), Vec2::new(w, h));
+        let panel = Rect::from_center_size(panel0.center(), panel0.size() * (if self.open { 1.0 } else { 1.0 + 0.06 * self.peek.pos }));
+        let pc = anim::clamp01(p);
+        let painter = ui.painter_at(ui.max_rect().expand(40.0));
+        let feather = 1.0 / ctx.pixels_per_point();
         let flare = if minimal_pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
         let radius = if minimal_pill { (self.h.pos.max(4.0)) / 2.0 } else { lerp(12.5, RAD * k.min(1.0), pc) };
         let flare_h = lerp(8.0, FLARE_H, pc);
         let thick = glass::thickness(PH);
         let shadow_k = glass::shadow_alpha(0.0, thick) / 0.12;
-        shape::shadow(&painter, panel, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k);
+        if !drop_visual {
+            shape::shadow(&painter, panel, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k);
+        }
         let notice_rect=self.notice_rect(cx,top);
         // 传统通知徽章的黑色衬底只画旧徽章；分裂小胶囊自己画胶囊外形。
         let notice_shape=if self.side_slot.is_none() { notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max)) } else { None };
         if let Some(r)=notice_shape {shape::shadow(&painter,r,5.0,8.0,12.5,0.5*shadow_k);}
-        shape::fill(&painter, panel, flare, flare_h, radius, Color32::BLACK, feather);
+        if drop_visual {
+            Self::paint_drop(&painter, cx, top, w, h, de);
+        } else {
+            shape::fill(&painter, panel, flare, flare_h, radius, Color32::BLACK, feather);
+        }
         if let Some(r)=notice_shape {shape::fill(&painter,r,5.0,8.0,12.5,Color32::BLACK,feather);}
 
         // 内容只随形体「揭开」：不缩放，按面板裁剪，到 55% 才开始淡入
@@ -1925,6 +1953,17 @@ impl App {
         let a=self.hud_notice.as_ref().filter(|_|self.notice_details&&self.notice.is_some())?;
         let badge=self.notice_rect(cx,top)?;let (width,height)=self.notice_size(a);
         Some(Rect::from_min_size(badge.left_bottom()+Vec2::new(0.0,6.0),Vec2::new(width,height)))
+    }
+
+    /// 画一颗贴在屏顶的正圆小黑丸——iPhone 灵动岛收束后的样子。
+    /// `de` 是吸入进度：0 = 完整圆点，1 = 已被屏顶吞掉；中途整体加速上移并淡出。
+    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32) {
+        let alpha = (1.0 - smoothstep(0.56, 0.97, de)).clamp(0.0, 1.0);
+        if alpha <= 0.004 { return; }
+        let r = (w.min(h) / 2.0).max(1.0);
+        let sink = de * (h + 6.0);
+        let cy = top - sink + h / 2.0;
+        painter.circle_filled(Pos2::new(cx, cy), r, Color32::from_black_alpha((alpha * 255.0) as u8));
     }
 
     /// 悬停状态机：意图缓冲 → 弹簧展开 → 离开延迟 → 临界阻尼收起；全程可打断。
