@@ -1225,8 +1225,8 @@ impl App {
                                 ui.label(egui::RichText::new("清空已收到的邮件").size(13.0));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                                     if ui.add_sized([96.0,28.0],egui::Button::new("清空")).clicked(){
-                                        self.mail.recent.clear();
-                                        self.mail.open_uid=None;
+                                        // 和岛内「清空」走同一条路径：连阅读窗口一起关掉。
+                                        self.mail.clear();
                                         self.code_seen=None;
                                         self.privacy=Default::default();
                                         self.mail.note="已清空收到的邮件".into();
