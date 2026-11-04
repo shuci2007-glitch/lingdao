@@ -7,7 +7,7 @@
 //!   %APPDATA%\Daozai\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
 //!   %APPDATA%\Daozai\shelf.txt      -> 置物清单（每行一个绝对路径）
 //!
-//! 设置环境变量 `DAOZAI_DATA_DIR` 可把以上目录整体改到别处（用于与已安装的
+//! 设置环境变量 `LINGDAO_DATA_DIR`（旧名 `DAOZAI_DATA_DIR` 仍兼容）可把以上目录整体改到别处（用于与已安装的
 //! 原工具并存、或跑测试时不碰真实数据）。
 
 use std::fs;
@@ -19,10 +19,38 @@ fn env_dir(key: &str) -> PathBuf {
 }
 
 pub fn config_dir() -> PathBuf {
-    if let Ok(root) = std::env::var("DAOZAI_DATA_DIR") {
+    // 新环境变量优先，旧名继续兼容（老脚本、测试仍在用）。
+    if let Ok(root) = std::env::var("LINGDAO_DATA_DIR").or_else(|_| std::env::var("DAOZAI_DATA_DIR")) {
         return PathBuf::from(root);
     }
-    env_dir("APPDATA").join("Daozai")
+    let dir = env_dir("APPDATA").join("Lingdao");
+    migrate_legacy_config(&dir);
+    dir
+}
+
+/// v0.6.52 改名前配置放在 `%APPDATA%\Daozai`。首次运行时整体复制到新目录，
+/// 只复制不删除——旧版本若被重新打开仍能读到自己那份，用户不会丢设置。
+fn migrate_legacy_config(new: &Path) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let old = env_dir("APPDATA").join("Daozai");
+        if new.exists() || !old.is_dir() { return; }
+        let _ = copy_tree(&old, new);
+    });
+}
+
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            let _ = fs::copy(entry.path(), target);
+        }
+    }
+    Ok(())
 }
 
 fn read_kv(path: &Path) -> Vec<(String, String)> {
@@ -689,6 +717,22 @@ pub fn human_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_dir_env_accepts_new_and_legacy_names() {
+        let old_new = std::env::var("LINGDAO_DATA_DIR").ok();
+        let old_legacy = std::env::var("DAOZAI_DATA_DIR").ok();
+        let target = std::env::temp_dir().join("lingdao-data-dir-test");
+        std::env::set_var("LINGDAO_DATA_DIR", &target);
+        std::env::set_var("DAOZAI_DATA_DIR", "should-be-ignored");
+        assert_eq!(config_dir(), target, "新变量优先");
+        std::env::remove_var("LINGDAO_DATA_DIR");
+        std::env::set_var("DAOZAI_DATA_DIR", &target);
+        assert_eq!(config_dir(), target, "旧变量仍然兼容");
+        // 复原，避免影响其它测试。
+        match old_new { Some(v)=>std::env::set_var("LINGDAO_DATA_DIR",v), None=>std::env::remove_var("LINGDAO_DATA_DIR") }
+        match old_legacy { Some(v)=>std::env::set_var("DAOZAI_DATA_DIR",v), None=>std::env::remove_var("DAOZAI_DATA_DIR") }
+    }
 
     #[test]
     fn quality_save_preserves_neighbor_and_cleans_failed_writes() {

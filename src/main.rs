@@ -1,10 +1,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
-//! Windows 外壳：无边框透明窗口 + 托盘 + 系统数据，界面全部交给 `daozai::app::App`。
+//! Windows 外壳：无边框透明窗口 + 托盘 + 系统数据，界面全部交给 `lingdao::app::App`。
 
 use eframe::egui::{self, Color32, Pos2};
-use daozai::app::{self, App, Cmd, Env, Options};
-use daozai::smtc;
-use daozai::poll_clock::PollClock;
+use lingdao::app::{self, App, Cmd, Env, Options};
+use lingdao::smtc;
+use lingdao::poll_clock::PollClock;
 use std::time::{Duration, Instant};
 
 mod diagnostics;
@@ -20,40 +20,40 @@ struct Shell {
     placement_scale: f32,
     sys: (Option<u8>, bool, PollClock),
     #[cfg(windows)]
-    system_state: daozai::system::Snapshot,
+    system_state: lingdao::system::Snapshot,
     #[cfg(windows)]
-    system_rx: std::sync::mpsc::Receiver<daozai::system::Observation>,
+    system_rx: std::sync::mpsc::Receiver<lingdao::system::Observation>,
     fullscreen: bool,
-    input_state:daozai::input::Monitor,
+    input_state:lingdao::input::Monitor,
     #[cfg(windows)]
-    input_keys:Option<daozai::input::Shortcuts>,
+    input_keys:Option<lingdao::input::Shortcuts>,
     #[cfg(windows)]
     #[allow(dead_code)]
-    mouse:Option<daozai::input::MouseHook>,
+    mouse:Option<lingdao::input::MouseHook>,
     #[cfg(windows)]
-    incoming: Option<std::sync::mpsc::Receiver<daozai::system::Incoming>>,
+    incoming: Option<std::sync::mpsc::Receiver<lingdao::system::Incoming>>,
     #[cfg(windows)]
     hidden: bool,
     #[cfg(windows)]
-    native: Option<daozai::native::Window>,
+    native: Option<lingdao::native::Window>,
     #[cfg(windows)]
-    tray: Option<daozai::tray::Tray>,
+    tray: Option<lingdao::tray::Tray>,
     #[cfg(windows)]
     autostart: bool,
     /// v0.5.4：蓝牙音频设备（后台线程推送）与音量回声的静默窗口。
     #[cfg(windows)]
-    bt_rx: Option<std::sync::mpsc::Receiver<Vec<daozai::bt::Device>>>,
-    bt: Vec<daozai::bt::Device>,
+    bt_rx: Option<std::sync::mpsc::Receiver<Vec<lingdao::bt::Device>>>,
+    bt: Vec<lingdao::bt::Device>,
     bt_ready: bool,
     volume_quiet: PollClock,
     /// v0.5.5：邮件收信服务（工作线程），以及上次同步给它的账号/开关快照。
-    mail: daozai::mail::Service,
-    mail_sig: (bool, u32, Vec<daozai::mail::Account>),
+    mail: lingdao::mail::Service,
+    mail_sig: (bool, u32, Vec<lingdao::mail::Account>),
     /// v0.5.6：日程（CalDAV）服务与上次下发的配置。
-    cal: daozai::calendar::Service,
-    cal_sig: (Vec<daozai::calendar::Config>, bool),
-    quota: daozai::quota::Service,
-    quota_sig: Option<(bool,Vec<daozai::quota::Account>)>,
+    cal: lingdao::calendar::Service,
+    cal_sig: (Vec<lingdao::calendar::Config>, bool),
+    quota: lingdao::quota::Service,
+    quota_sig: Option<(bool,Vec<lingdao::quota::Account>)>,
     quota_at: PollClock,
     /// 复制过的敏感文本（验证码等）：到点自动清空剪贴板。
     clip_clear: Option<(Instant, String)>,
@@ -80,20 +80,20 @@ impl Shell {
         let media = smtc::shared();
         smtc::spawn_poller(media.clone(),cc.egui_ctx.clone());
         // 预热音效资源，首次播放更跟手。
-        daozai::sfx::warmup();
+        lingdao::sfx::warmup();
         #[cfg(windows)]
-        let autostart = daozai::tray::autostart_enabled();
+        let autostart = lingdao::tray::autostart_enabled();
         #[cfg(windows)]
-        let tray = daozai::tray::Tray::start(daozai::tray::State {
+        let tray = lingdao::tray::Tray::start(lingdao::tray::State {
             pet: app.settings.pet,
             minimal: app.settings.minimal,
             autostart,
         });
         #[cfg(windows)]
-        let incoming=if app.settings.read_notifications {match daozai::system::connect(){Ok(rx)=>Some(rx),Err(e)=>{app.listener_status=format!("Windows 无法读取通知：{}",e.code());None}}}else{None};
-        let initial_input=daozai::input::State::read();
-        #[cfg(windows)] let system_state=daozai::system::Snapshot::read();
-        #[cfg(windows)] let system_rx=daozai::system::observe(cc.egui_ctx.clone(),system_state.clone(),initial_input);
+        let incoming=if app.settings.read_notifications {match lingdao::system::connect(){Ok(rx)=>Some(rx),Err(e)=>{app.listener_status=format!("Windows 无法读取通知：{}",e.code());None}}}else{None};
+        let initial_input=lingdao::input::State::read();
+        #[cfg(windows)] let system_state=lingdao::system::Snapshot::read();
+        #[cfg(windows)] let system_rx=lingdao::system::observe(cc.egui_ctx.clone(),system_state.clone(),initial_input);
         Self {
             app,
             t0: Instant::now(),
@@ -108,27 +108,27 @@ impl Shell {
             system_state,
             #[cfg(windows)] system_rx,
             fullscreen:false,
-            input_state:daozai::input::Monitor::new(initial_input),
-            #[cfg(windows)] input_keys:daozai::input::Shortcuts::start(),
-            #[cfg(windows)] mouse:daozai::input::start_mouse(),
+            input_state:lingdao::input::Monitor::new(initial_input),
+            #[cfg(windows)] input_keys:lingdao::input::Shortcuts::start(),
+            #[cfg(windows)] mouse:lingdao::input::start_mouse(),
             #[cfg(windows)] incoming,
             #[cfg(windows)] hidden:false,
             #[cfg(windows)]
-            native: daozai::native::Window::new(cc),
+            native: lingdao::native::Window::new(cc),
             #[cfg(windows)]
             tray,
             #[cfg(windows)]
             autostart,
             #[cfg(windows)]
-            bt_rx: Some(daozai::bt::spawn()),
+            bt_rx: Some(lingdao::bt::spawn()),
             bt: Vec::new(),
             bt_ready: false,
             volume_quiet: PollClock::default(),
-            mail: daozai::mail::Service::start(),
+            mail: lingdao::mail::Service::start(),
             mail_sig: (false, 0, Vec::new()),
-            cal: daozai::calendar::Service::start(),
+            cal: lingdao::calendar::Service::start(),
             cal_sig: (Vec::new(), true),
-            quota: daozai::quota::Service::start(), quota_sig: None, quota_at: PollClock::default(),
+            quota: lingdao::quota::Service::start(), quota_sig: None, quota_at: PollClock::default(),
             clip_clear: None,
             user_hidden: false,
             hotkey_sig: (String::new(), String::new()),
@@ -137,7 +137,7 @@ impl Shell {
 
     #[cfg(windows)]
     fn poll_tray(&mut self) {
-        use daozai::tray::{self, Event};
+        use lingdao::tray::{self, Event};
         let events = self.tray.as_ref().map(|t| t.poll()).unwrap_or_default();
         for e in events {
             match e {
@@ -196,7 +196,7 @@ impl Shell {
             network: Some(self.system_state.network),
             cursor,
             idle_seconds: {
-                #[cfg(windows)] {Some(daozai::system::idle_seconds())}
+                #[cfg(windows)] {Some(lingdao::system::idle_seconds())}
                 #[cfg(not(windows))] {None}
             },
             browser_at_top: {
@@ -227,13 +227,13 @@ impl eframe::App for Shell {
         #[cfg(windows)]
         self.poll_tray();
         // 全局快捷键：绑定变了就下发一次，再看有没有按下。
-        daozai::smtc::set_deep_media(self.app.settings.media_deep);
+        lingdao::smtc::set_deep_media(self.app.settings.media_deep);
         let sig = (self.app.settings.hotkey_hide.clone(), self.app.settings.hotkey_minimal.clone());
         if sig != self.hotkey_sig {
-            daozai::input::set_hotkeys(&sig.0, &sig.1);
+            lingdao::input::set_hotkeys(&sig.0, &sig.1);
             self.hotkey_sig = sig;
         }
-        let hotkey = daozai::input::take_hotkey();
+        let hotkey = lingdao::input::take_hotkey();
         if hotkey & 1 != 0 {
             self.user_hidden = !self.user_hidden;
             let message = if self.user_hidden { "已隐藏 · 再按一次恢复" } else { "灵岛已显示" };
@@ -249,7 +249,7 @@ impl eframe::App for Shell {
             self.app.say(if next { "极简刘海已打开" } else { "极简刘海已关闭" });
         }
         #[cfg(windows)]
-        if daozai::native::take_foreground_change() {
+        if lingdao::native::take_foreground_change() {
             // 切到别的程序：收起，并在光标离开前不再自动展开
             self.app.foreground_changed();
         }
@@ -258,8 +258,8 @@ impl eframe::App for Shell {
         if self.placement_scale!=ctx.pixels_per_point() || self.placement_at.ready(Duration::from_secs(1)) {
             self.placement_at=PollClock::now();
             self.placement_scale=ctx.pixels_per_point();
-            self.app.displays=daozai::display_layout::connected();
-            let display=daozai::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
+            self.app.displays=lingdao::display_layout::connected();
+            let display=lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
             let placed=display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(self.placement_scale,d.bounds)));
             if placed {
                 let first=!self.placed;
@@ -306,7 +306,7 @@ impl eframe::App for Shell {
                 while let Ok(found)=rx.try_recv(){ self.bt=found; self.bt_ready=true; }
             }
             if let Some(rx)=&self.incoming {
-                while let Ok(event)=rx.try_recv(){match event {daozai::system::Incoming::Status(s)=>self.app.listener_status=s,daozai::system::Incoming::Message(a,id,b)=>self.app.receive_notification(a,id,b)}}
+                while let Ok(event)=rx.try_recv(){match event {lingdao::system::Incoming::Status(s)=>self.app.listener_status=s,lingdao::system::Incoming::Message(a,id,b)=>self.app.receive_notification(a,id,b)}}
             }
         }
         // 验证码这类敏感文本只占用剪贴板一小会儿；只清我们放进去的那一段，
@@ -322,7 +322,7 @@ impl eframe::App for Shell {
         // v0.5.5 邮件：开关 / 间隔 / 账号清单变了就重新对齐收信线程，再把事件交给界面。
         let sig=(self.app.settings.mail_enabled,self.app.settings.mail_interval,self.app.mail_accounts().to_vec());
         if sig!=self.mail_sig{
-            let accounts:&[daozai::mail::Account]=if sig.0{ &sig.2 }else{ &[] };
+            let accounts:&[lingdao::mail::Account]=if sig.0{ &sig.2 }else{ &[] };
             self.mail.sync(accounts,sig.1);
             self.mail_sig=sig;
         }
@@ -375,21 +375,21 @@ impl eframe::App for Shell {
                 }
                 Cmd::Open(p) => {if let Err(e)=open_path(&p){self.app.say(e);}},
                 Cmd::OpenUrl(url)=>{
-                    if let Some(url)=daozai::mail::web_url(&url) {
+                    if let Some(url)=lingdao::mail::web_url(&url) {
                         if open_path(std::path::Path::new(&url)).is_err(){self.app.say("无法打开默认浏览器，请检查 Windows 默认应用设置");}
                     }
                 },
                 Cmd::AddFiles=>{
-                    #[cfg(windows)] match daozai::system::pick_files(){Ok(files)=>if !files.is_empty(){self.app.on_drop(files);self.app.show_page(3);},Err(e)=>self.app.say(format!("无法选择文件：{}",e.code()))}
+                    #[cfg(windows)] match lingdao::system::pick_files(){Ok(files)=>if !files.is_empty(){self.app.on_drop(files);self.app.show_page(3);},Err(e)=>self.app.say(format!("无法选择文件：{}",e.code()))}
                 },
                 Cmd::DragFile(p)=>{
-                    #[cfg(windows)] if let Err(e)=daozai::system::drag_file(&p){self.app.say(format!("无法拖出文件：{}",e.code()));}
+                    #[cfg(windows)] if let Err(e)=lingdao::system::drag_file(&p){self.app.say(format!("无法拖出文件：{}",e.code()));}
                     ctx.input_mut(|i| i.pointer=Default::default());
                 },
                 Cmd::DisconnectNotifications=>{#[cfg(windows)]{self.incoming=None;self.app.settings.read_notifications=false;self.app.settings.save();self.app.listener_status="已断开，不再读取 Windows 通知".into();}},
                 Cmd::Reveal(p)=>{let _=std::process::Command::new("explorer.exe").arg(format!("/select,{}",p.display())).spawn();},
                 Cmd::QuotaChooseFile=>{
-                    #[cfg(windows)] match daozai::system::pick_files_for("选择 AI 账号的登录 JSON 文件",false){Ok(files)=>if let Some(path)=files.into_iter().next(){self.app.quota_set_source(path);},Err(_)=>self.app.say("无法选择登录文件")}
+                    #[cfg(windows)] match lingdao::system::pick_files_for("选择 AI 账号的登录 JSON 文件",false){Ok(files)=>if let Some(path)=files.into_iter().next(){self.app.quota_set_source(path);},Err(_)=>self.app.say("无法选择登录文件")}
                 },
                 Cmd::QuotaRefresh=>{
                     if self.quota_at.ready(Duration::from_secs(15)) {
@@ -399,14 +399,14 @@ impl eframe::App for Shell {
                 },
                 Cmd::QuotaConnected=>{self.quota_sig=None;},
                 Cmd::ToggleAutostart=>{
-                    #[cfg(windows)] {let want=!self.autostart;match daozai::tray::set_autostart(want){Ok(())=>self.autostart=want,Err(e)=>self.app.say(e)}}
+                    #[cfg(windows)] {let want=!self.autostart;match lingdao::tray::set_autostart(want){Ok(())=>self.autostart=want,Err(e)=>self.app.say(e)}}
                 },
                 Cmd::SetVolume(v)=>{
-                    #[cfg(windows)] daozai::system::set_volume(v);
+                    #[cfg(windows)] lingdao::system::set_volume(v);
                     self.volume_quiet=PollClock::now();
                 },
                 Cmd::ToggleMute=>{
-                    #[cfg(windows)] daozai::system::toggle_mute();
+                    #[cfg(windows)] lingdao::system::toggle_mute();
                     self.volume_quiet=PollClock::now();
                 },
                 Cmd::Copy(text)=>{
@@ -419,7 +419,7 @@ impl eframe::App for Shell {
                     #[cfg(windows)] if let Some(tray)=&self.tray{tray.notify(&title,&body,self.app.settings.sound);}
                 },
                 Cmd::RequestNotifications=>{
-                    #[cfg(windows)] {self.app.settings.read_notifications=true;self.app.settings.save();self.incoming=None;match daozai::system::connect(){Ok(rx)=>{self.incoming=Some(rx);self.app.listener_status="正在请求 Windows 通知权限…".into();},Err(e)=>self.app.listener_status=format!("Windows 未允许读取通知：{}。需要相应的系统权限或应用身份。",e.code())}}
+                    #[cfg(windows)] {self.app.settings.read_notifications=true;self.app.settings.save();self.incoming=None;match lingdao::system::connect(){Ok(rx)=>{self.incoming=Some(rx);self.app.listener_status="正在请求 Windows 通知权限…".into();},Err(e)=>self.app.listener_status=format!("Windows 未允许读取通知：{}。需要相应的系统权限或应用身份。",e.code())}}
                 },
                 Cmd::MailSync=>{
                     let enabled=self.app.settings.mail_enabled;
@@ -432,8 +432,8 @@ impl eframe::App for Shell {
                 Cmd::CalendarSync=>self.cal.sync_now(),
                 Cmd::CalendarMonth(month)=>self.cal.view_month(month),
                 Cmd::CalendarForget=>{
-                    if let Err(error)=daozai::calendar::forget_config(){self.app.say(&error);continue;}
-                    if let Some(old)=self.app.forget_calendar(){daozai::calendar::secrets::delete(&old);}
+                    if let Err(error)=lingdao::calendar::forget_config(){self.app.say(&error);continue;}
+                    if let Some(old)=self.app.forget_calendar(){lingdao::calendar::secrets::delete(&old);}
                     let configs=self.app.calendar_configs();
                     self.cal.configure(configs.clone(),self.app.settings.calendar_auto_sync);
                     self.cal_sig=(configs,self.app.settings.calendar_auto_sync);
@@ -576,13 +576,13 @@ fn main() -> std::process::ExitCode {
 fn run() -> eframe::Result<()> {
     // 单实例（与原版同名互斥体）
     #[cfg(windows)]
-    if !daozai::tray::single_instance() {
-        if std::env::args().any(|arg|arg=="--settings"){daozai::tray::open_settings();}
-        if std::env::args().any(|arg|arg=="--calendar"){daozai::tray::open_calendar();}
+    if !lingdao::tray::single_instance() {
+        if std::env::args().any(|arg|arg=="--settings"){lingdao::tray::open_settings();}
+        if std::env::args().any(|arg|arg=="--calendar"){lingdao::tray::open_calendar();}
         return Ok(());
     }
     let viewport = egui::ViewportBuilder::default()
-        .with_title("灵岛").with_icon(daozai::theme::app_icon())
+        .with_title("灵岛").with_icon(lingdao::theme::app_icon())
         .with_inner_size([app::CANVAS_W, app::WIN_H])
         .with_decorations(false)
         .with_transparent(true)

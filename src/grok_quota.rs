@@ -82,7 +82,7 @@ fn native_session(account:&Account)->Result<Session,String>{
 #[cfg(windows)]
 fn credential(slot:&str)->Result<keyring::Entry,String>{
     if slot.len()!=64 || !slot.bytes().all(|b|b.is_ascii_hexdigit()){return Err(LOGIN_ERROR.into());}
-    keyring::Entry::new("Daozai.GrokBot",slot).map_err(|_|"无法打开 Windows 凭据管理器".into())
+    keyring::Entry::new("Lingdao.GrokBot",slot).map_err(|_|"无法打开 Windows 凭据管理器".into())
 }
 #[cfg(windows)]
 fn save_session(slot:&str,value:&Session)->Result<(),String>{
@@ -93,7 +93,7 @@ fn save_session(slot:&str,value:&Session)->Result<(),String>{
 fn save_session(_slot:&str,_value:&Session)->Result<(),String>{Err("当前系统暂不支持安全保存 Grok Bot 登录".into())}
 #[cfg(windows)]
 fn stored_session(slot:&str)->Result<Session,String>{
-    let raw=credential(slot)?.get_password().map_err(|_|LOGIN_ERROR)?;
+    let raw=crate::secrets::get("Lingdao.GrokBot",slot).map_err(|_|LOGIN_ERROR)?;
     let value:Value=serde_json::from_str(&raw).map_err(|_|LOGIN_ERROR)?;let session=session(&value)?;
     if slot_of(&session.token)?!=slot{return Err(LOGIN_ERROR.into());}Ok(session)
 }
@@ -101,7 +101,7 @@ fn stored_session(slot:&str)->Result<Session,String>{
 fn stored_session(_slot:&str)->Result<Session,String>{Err(LOGIN_ERROR.into())}
 pub fn forget(account:&Account){
     #[cfg(windows)]
-    if account.source.as_os_str().is_empty(){if let Some(slot)=&account.slot{if let Ok(entry)=credential(slot){let _=entry.delete_credential();}}}
+    if account.source.as_os_str().is_empty(){if let Some(slot)=&account.slot{crate::secrets::delete("Lingdao.GrokBot",slot);}}
     #[cfg(not(windows))] let _=account;
 }
 

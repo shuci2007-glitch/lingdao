@@ -7,9 +7,9 @@
 mod raster;
 
 use eframe::egui::{self, Color32, Event, Pos2, Rect, Shape, Stroke, Vec2};
-use daozai::app::{App, Cmd, Env, FrameOut, Options, WIN_H, WIN_W};
-use daozai::lyrics;
-use daozai::smtc::{NowPlaying, Transport};
+use lingdao::app::{App, Cmd, Env, FrameOut, Options, WIN_H, WIN_W};
+use lingdao::lyrics;
+use lingdao::smtc::{NowPlaying, Transport};
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -22,7 +22,7 @@ const WX: f32 = (CW - WIN_W) / 2.0; // 窗口在画布中的位置
 
 /// 面板坐标（相对展开面板左上角）→ 画布坐标
 fn p(x: f32, y: f32) -> Pos2 {
-    Pos2::new(CW / 2.0 - daozai::app::PW / 2.0 + x, y)
+    Pos2::new(CW / 2.0 - lingdao::app::PW / 2.0 + x, y)
 }
 
 #[derive(Clone)]
@@ -110,7 +110,7 @@ fn setup_data() -> (PathBuf, PathBuf) {
     hours[13] = 200;
     let hs: Vec<String> = hours.iter().map(|h| h.to_string()).collect();
     std::fs::write(data.join("water-extra.txt"), format!("drunk=750\nrefills=0\nremind=1\nhours={}\n", hs.join(","))).unwrap();
-    std::env::set_var("DAOZAI_DATA_DIR", &data);
+    std::env::set_var("LINGDAO_DATA_DIR", &data);
     (root, drag)
 }
 
@@ -237,7 +237,7 @@ fn wallpaper(w: usize, h: usize) -> Vec<[f32; 4]> {
                 c[i] = (c[i] + glow).min(1.0);
             }
             // 轻微颗粒，避免色带
-            let n = (daozai::anim::hash01((x * 7919 + y * 104729) as u64) - 0.5) * 0.008;
+            let n = (lingdao::anim::hash01((x * 7919 + y * 104729) as u64) - 0.5) * 0.008;
             v[y * w + x] = [c[0] + n, c[1] + n, c[2] + n, 1.0];
         }
     }
@@ -409,7 +409,7 @@ fn main() {
             events.push(Event::PointerButton { pos: cursor, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() });
             pending_release = false;
         }
-        drag_a = daozai::anim::approach(drag_a, if dragging.is_some() { 1.0 } else { 0.0 }, 14.0, 1.0 / 60.0);
+        drag_a = lingdao::anim::approach(drag_a, if dragging.is_some() { 1.0 } else { 0.0 }, 14.0, 1.0 / 60.0);
 
         // 鼠标只有在窗口的可交互区域里才会被应用“看见”（与真窗口的区域裁剪一致）
         let inside = region.contains(cursor) && !first;
@@ -473,7 +473,7 @@ fn main() {
             ripples.retain(|(_, t0)| t - t0 < 0.45);
             for (at, t0) in &ripples {
                 let k = ((t - t0) / 0.45) as f32;
-                let r = 5.0 + 13.0 * daozai::anim::ease_out_cubic(k);
+                let r = 5.0 + 13.0 * lingdao::anim::ease_out_cubic(k);
                 painter.circle_stroke(*at, r, Stroke::new(1.6_f32, Color32::from_white_alpha((150.0 * (1.0 - k)) as u8)));
             }
             let press = (1.0 - ((t - press_t) / 0.18) as f32).clamp(0.0, 1.0);

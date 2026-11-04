@@ -23,10 +23,12 @@ fn editing_local_calendar_clears_outdated_reminders() {
         let draft=h.app.calendar.draft.as_mut().unwrap();
         if reschedule {
             let day=(chrono::Local::now().date_naive()+chrono::Duration::days(2)).to_string();
+            // 固定时间，避免在 23:00 之后跑测试时默认时间跨零点导致当天结束早于开始。
             draft.start_date=day.clone();draft.end_date=day;
+            draft.start_time="10:00".into();draft.end_time="11:00".into();
         } else {draft.reminder=None;}
         h.app.save_calendar_editor();
-        assert!(h.app.calendar.draft.is_none());
+        assert!(h.app.calendar.draft.is_none(),"改期/取消提醒后应当保存成功：{:?}",h.app.calendar.draft.as_ref().map(|d|d.error.clone()));
         assert!(!h.app.notice.as_ref().is_some_and(|a|a.meeting.as_ref().is_some_and(|(m,_)|m.uid==entry.event.uid)),"修改后不能继续显示旧提醒");
         assert!(!h.app.alerts.iter().any(|a|a.meeting.as_ref().is_some_and(|(m,_)|m.uid==entry.event.uid)),"修改后不能弹出排队中的旧提醒");
         assert!(h.app.alerts.iter().any(|a|a.meeting.as_ref().is_some_and(|(m,_)|m.uid=="另一日程")));
@@ -271,7 +273,7 @@ struct H {
 impl H {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("daozai-test-{}-{}", std::process::id(), rand_id()));
-        std::env::set_var("DAOZAI_DATA_DIR", &dir);
+        std::env::set_var("LINGDAO_DATA_DIR", &dir);
         let ctx = egui::Context::default();
         let mut app = App::new(&ctx, Options { fetch_lyrics: false, pet_idle: 1e9 });
         // 测试里用较短的离开延时，保留原有"离开即收起"的机制测试；
@@ -3541,4 +3543,37 @@ fn manual_minimal_does_not_override_pill_and_tap_opens_island() {
     h.frame(vec![egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::default()}]);
     h.frame(vec![egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::default()}]);
     assert!(h.app.open, "点击胶囊应展开灵动岛");
+}
+
+#[test]
+fn mail_delete_and_clear_only_touch_the_local_list() {
+    use crate::app::MailState;
+    fn item(uid: u32, account: &str) -> crate::mail::Item {
+        crate::mail::Item {
+            account: account.into(), from: "发件人".into(), subject: format!("主题 {uid}"),
+            time: "11-04 12:00".into(), code: None, summary: String::new(),
+            links: vec![], meeting: None, uid,
+        }
+    }
+    let mut mail = MailState::default();
+    mail.recent = vec![item(1, "a@example.com"), item(2, "a@example.com"), item(3, "b@example.com")];
+    mail.open_uid = Some(("a@example.com".into(), 1));
+
+    // 删一封：只掉这一封，其它账号的邮件不受影响，打开的详情自动关掉。
+    mail.dismiss("a@example.com", 1);
+    assert_eq!(mail.recent.len(), 2);
+    assert!(mail.recent.iter().all(|m| m.uid != 1));
+    assert!(mail.open_uid.is_none(), "删掉正在查看的邮件后应关闭详情");
+
+    // 同 uid 不同账号不能被误删。
+    mail.recent.push(item(9, "a@example.com"));
+    mail.recent.push(item(4, "c@example.com"));
+    mail.dismiss("c@example.com", 9);
+    assert!(mail.recent.iter().any(|m| m.uid == 9 && m.account == "a@example.com"));
+
+    // 清空：列表和详情一起清掉。
+    mail.open_uid = Some(("a@example.com".into(), 9));
+    mail.clear();
+    assert!(mail.recent.is_empty());
+    assert!(mail.open_uid.is_none());
 }

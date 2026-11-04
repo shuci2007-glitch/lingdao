@@ -7,7 +7,7 @@ Unicode true
 !include "FileFunc.nsh"
 
 !ifndef APP_ID
-  !define APP_ID "Daozai"
+  !define APP_ID "Lingdao"
 !endif
 !ifndef APP_NAME
   !define APP_NAME "灵岛"
@@ -38,7 +38,7 @@ Page custom InstallPage InstallPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "灵岛已安装"
 !define MUI_FINISHPAGE_TEXT "音乐、提醒和日常小事，现在都在桌面上的小岛里。"
-!define MUI_FINISHPAGE_RUN "$INSTDIR\daozai.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\lingdao.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "打开灵岛"
 !insertmacro MUI_PAGE_FINISH
 !define MUI_UNCONFIRMPAGE_TEXT_TOP "将卸载灵岛。设置、待办和连接记录会保留，重新安装后仍可使用。"
@@ -155,7 +155,7 @@ Function ValidateDirectory
   SetErrorLevel 0
   Return
   invalid:
-    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择可写入的完整安装文件夹，例如 D:\Apps\Daozai。不要选择磁盘根目录或需要管理员权限的文件夹。" /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请选择可写入的完整安装文件夹，例如 D:\Apps\Lingdao。不要选择磁盘根目录或需要管理员权限的文件夹。" /SD IDOK
     SetErrorLevel 1
     Abort
 FunctionEnd
@@ -192,32 +192,36 @@ Section "安装"
   Call ValidateDirectory
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  File /oname=daozai.exe "${SOURCE_EXE}"
+  File /oname=lingdao.exe "${SOURCE_EXE}"
   File "${PROJECT_DIR}\LICENSE"
   File "${PROJECT_DIR}\THIRD_PARTY_NOTICES.txt"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   ${If} $DesktopChoice == 1
-    CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\daozai.exe"
+    CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\lingdao.exe"
   ${Else}
     Delete "$DESKTOP\${APP_NAME}.lnk"
   ${EndIf}
   ${If} $AutoStartChoice == 1
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}" '"$INSTDIR\daozai.exe"'
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}" '"$INSTDIR\lingdao.exe"'
   ${Else}
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
   ${EndIf}
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\daozai.exe"
-  CreateShortcut "$SMPROGRAMS\${APP_NAME}设置.lnk" "$INSTDIR\daozai.exe" "--settings"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP_NAME} Daozai"
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}.lnk" "$INSTDIR\lingdao.exe"
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}设置.lnk" "$INSTDIR\lingdao.exe" "--settings"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP_NAME} Lingdao"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "灵岛"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\daozai.exe,0"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\lingdao.exe,0"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   Delete "$INSTDIR\uninstall.ps1"
+  ; v0.6.52 改名前叫 Daozai：只清掉旧启动项和同名目录里的旧 exe，
+  ; 旧安装目录（Programs\Daozai）和它的卸载项保留，方便你在「设置 → 应用」里正常卸载。
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Daozai"
+  Delete "$INSTDIR\daozai.exe"
 SectionEnd
 
 Function un.onInit
@@ -227,6 +231,8 @@ FunctionEnd
 
 Section "Uninstall"
   Call un.CheckClosed
+  Delete "$INSTDIR\lingdao.exe"
+  Delete "$INSTDIR\lingdao-previous.exe"
   Delete "$INSTDIR\daozai.exe"
   Delete "$INSTDIR\daozai-previous.exe"
   Delete "$INSTDIR\daozai-v0.2-backup.exe"
@@ -238,9 +244,10 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   Delete "$SMPROGRAMS\${APP_NAME}设置.lnk"
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
-  ${If} $0 == '"$INSTDIR\daozai.exe"'
+  ${If} $0 == '"$INSTDIR\lingdao.exe"'
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
   ${EndIf}
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Daozai"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
   ; 只移除空的安装目录，用户数据和用户自行放入的文件都保留。
   RMDir "$INSTDIR"

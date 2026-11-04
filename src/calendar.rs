@@ -13,7 +13,7 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use chrono::{Datelike, NaiveDate};
 
-pub const SERVICE: &str = "Daozai.Calendar";
+pub const SERVICE: &str = "Lingdao.Calendar";
 /// 开启自动同步时每 5 分钟更新一次。
 const SYNC_SECS: u64 = 300;
 /// 只取未来 24 小时。
@@ -223,24 +223,19 @@ pub fn forget_config() -> Result<(), String> {
 pub mod secrets {
     /// 凭据只进 Windows 凭据管理器；键是「平台:用户名」，值是密码。
     pub fn save(cfg: &super::Config, password: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(super::SERVICE, &name(cfg))
-            .map_err(|e| format!("凭据管理器不可用：{e}"))?;
-        entry.set_password(password).map_err(|e| format!("保存密码失败：{e}"))
+        crate::secrets::set(super::SERVICE, &name(cfg), password)
+            .map_err(|e| format!("保存密码失败：{e}"))
     }
 
     pub fn load(cfg: &super::Config) -> Result<String, String> {
-        let entry = keyring::Entry::new(super::SERVICE, &name(cfg))
-            .map_err(|e| format!("凭据管理器不可用：{e}"))?;
-        entry.get_password().map_err(|e| match e {
+        crate::secrets::get(super::SERVICE, &name(cfg)).map_err(|e| match e {
             keyring::Error::NoEntry => "还没有保存过密码".to_string(),
             _ => format!("读取密码失败（凭据管理器被锁定或拒绝访问，重填无效）：{e}"),
         })
     }
 
     pub fn delete(cfg: &super::Config) {
-        if let Ok(entry) = keyring::Entry::new(super::SERVICE, &name(cfg)) {
-            let _ = entry.delete_credential();
-        }
+        crate::secrets::delete(super::SERVICE, &name(cfg));
     }
 
     fn name(cfg: &super::Config) -> String {
@@ -373,7 +368,7 @@ fn agent() -> ureq::Agent {
         .timeout_write(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
         .redirects(0)
-        .user_agent(concat!("Daozai/",env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Lingdao/",env!("CARGO_PKG_VERSION")))
         .build()
 }
 

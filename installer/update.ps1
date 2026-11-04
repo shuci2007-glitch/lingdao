@@ -2,11 +2,11 @@ param([Parameter(Mandatory=$true)][string]$WorkPath, [Parameter(Mandatory=$true)
 $ErrorActionPreference = 'Stop'
 # 更新只使用当前 PowerShell 自带模块，避免继承其他终端版本的模块路径。
 $env:PSModulePath = [IO.Path]::Combine($PSHOME, 'Modules')
-$cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Daozai\Updates')).TrimEnd('\')
+$cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Lingdao\Updates')).TrimEnd('\')
 $workRoot = [IO.Path]::GetFullPath($WorkPath).TrimEnd('\')
 $target = [IO.Path]::GetFullPath($TargetExe)
 $targetDir = Split-Path $target -Parent
-$staged = Join-Path $targetDir ('daozai-update-' + [Guid]::NewGuid().ToString('N') + '.exe')
+$staged = Join-Path $targetDir ('lingdao-update-' + [Guid]::NewGuid().ToString('N') + '.exe')
 $backup = Join-Path $workRoot 'previous.exe'
 $replaced = $false
 $exited = $false
@@ -30,7 +30,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
-        $name = 'Daozai-v' + $version + '-windows-x64/daozai.exe'
+        $name = 'Lingdao-v' + $version + '-windows-x64/lingdao.exe'
         $entries = @($zip.Entries | Where-Object {$_.FullName.Replace('\','/') -ceq $name})
         if ($entries.Count -ne 1 -or $entries[0].Length -gt 200MB) { throw '更新包中缺少唯一的灵岛程序。' }
         [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $staged)
@@ -48,7 +48,7 @@ try {
     [IO.File]::Replace($staged, $target, [NullString]::Value)
     $replaced = $true
     Start-Process -FilePath $target -WorkingDirectory $targetDir -WindowStyle Hidden
-    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai'
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingdao'
     $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
     if ($registered -and [string]::Equals($registered.InstallLocation.TrimEnd('\'), $targetDir, [StringComparison]::OrdinalIgnoreCase)) {
         Set-ItemProperty -LiteralPath $key -Name DisplayVersion -Value $version -ErrorAction SilentlyContinue

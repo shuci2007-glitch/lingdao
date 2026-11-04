@@ -37,6 +37,7 @@ pub mod paint;
 pub mod shape;
 pub mod smtc;
 pub mod theme;
+pub mod secrets;
 pub mod settings_theme;
 pub mod sfx;
 pub mod display_layout;

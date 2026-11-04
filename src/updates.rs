@@ -107,7 +107,7 @@ impl State {
             ctx.load_texture("update-logo", egui::ColorImage::from_rgba_unmultiplied([icon.width as usize,icon.height as usize],&icon.rgba),egui::TextureOptions::LINEAR)
         }).id();
         let installing = self.rx.is_some() && self.cancel.is_none();
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("daozai-update"),
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("lingdao-update"),
             egui::ViewportBuilder::default().with_title("灵岛更新").with_icon(theme::app_icon())
                 .with_inner_size([520.0, 416.0]).with_resizable(false).with_decorations(false)
                 .with_transparent(true).with_active(true), |ctx, _| {
@@ -255,7 +255,7 @@ unsafe fn update_window_region(rect: egui::Rect, scale: f32) -> windows::Win32::
 
 fn check() -> Result<Option<Release>, String> {
     let response = ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
-        .get(API).set("User-Agent", concat!("Daozai/", env!("CARGO_PKG_VERSION")))
+        .get(API).set("User-Agent", concat!("Lingdao/", env!("CARGO_PKG_VERSION")))
         .set("Accept", "application/vnd.github+json").call().map_err(|error| match error {
             ureq::Error::Status(403 | 429, _) => "检查过于频繁，请稍后重试".to_owned(),
             ureq::Error::Status(404, _) => "暂未找到正式版本，请查看发布页".to_owned(),
@@ -268,7 +268,7 @@ fn check() -> Result<Option<Release>, String> {
 
 fn release_info(value: &serde_json::Value, current: &str) -> Result<Option<Release>, String> {
     let Some(tag) = parse_release(value, current)? else { return Ok(None); };
-    let name = format!("Daozai-v{}-windows-x64.zip", tag.trim_start_matches('v'));
+    let name = format!("Lingdao-v{}-windows-x64.zip", tag.trim_start_matches('v'));
     let expected = format!("{REPOSITORY}/releases/download/{tag}/{name}");
     let package = value["assets"].as_array().and_then(|assets| assets.iter().find(|asset| asset["name"] == name))
         .and_then(|asset| {
@@ -284,7 +284,7 @@ fn release_info(value: &serde_json::Value, current: &str) -> Result<Option<Relea
 
 fn download(release: &Release, tx: &mpsc::Sender<Event>, cancel: &AtomicBool) -> Result<PathBuf, String> {
     let package = release.package.as_ref().ok_or("请通过浏览器下载此版本")?;
-    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or("无法找到更新缓存目录")?.join("Daozai/Updates");
+    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or("无法找到更新缓存目录")?.join("Lingdao/Updates");
     let work = root.join(format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
     std::fs::create_dir_all(&work).map_err(|_| "无法创建更新缓存")?;
     let result = (|| {
@@ -395,8 +395,8 @@ mod tests {
     fn only_matching_verified_windows_package_can_install() {
         let mut value = release("v0.6.40");
         value["body"] = "更新说明".into();
-        value["assets"] = serde_json::json!([{"name":"Daozai-v0.6.40-windows-x64.zip",
-            "browser_download_url":format!("{REPOSITORY}/releases/download/v0.6.40/Daozai-v0.6.40-windows-x64.zip"),
+        value["assets"] = serde_json::json!([{"name":"Lingdao-v0.6.40-windows-x64.zip",
+            "browser_download_url":format!("{REPOSITORY}/releases/download/v0.6.40/Lingdao-v0.6.40-windows-x64.zip"),
             "size":123,"digest":format!("sha256:{}", "a".repeat(64))}]);
         let parsed = release_info(&value, "0.6.39").unwrap().unwrap();
         assert!(parsed.package.is_some()); assert_eq!(parsed.notes, "更新说明");
@@ -484,8 +484,8 @@ mod tests {
     fn available_update_preview() {
         let dest = std::path::PathBuf::from(std::env::var_os("DAOZAI_UPDATE_PREVIEW_DIR").expect("需指定预览目录"));
         std::fs::create_dir_all(&dest).unwrap();
-        let old = std::env::var_os("DAOZAI_DATA_DIR");
-        std::env::set_var("DAOZAI_DATA_DIR", dest.join("data"));
+        let old = std::env::var_os("LINGDAO_DATA_DIR");
+        std::env::set_var("LINGDAO_DATA_DIR", dest.join("data"));
         let ctx = egui::Context::default();
         let mut app = crate::app::App::new(&ctx, Default::default());
         app.updates.result = Some(Ok(Some(Release { version: "v0.6.40".into(),
@@ -499,7 +499,7 @@ mod tests {
         let capture = output.clone();
         egui::Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
             let id = viewport.ids.this;
-            assert_eq!(id, egui::ViewportId::from_hash_of("daozai-update"));
+            assert_eq!(id, egui::ViewportId::from_hash_of("lingdao-update"));
             let raw = egui::RawInput {
                 viewport_id: id,
                 viewports: std::iter::once((id, egui::ViewportInfo { native_pixels_per_point: Some(1.0), ..Default::default() })).collect(),
@@ -524,8 +524,8 @@ mod tests {
             raster.free_textures(&root.textures_delta);
             raster.free_textures(&child.textures_delta);
         }
-        if let Some(old) = old { std::env::set_var("DAOZAI_DATA_DIR", old); }
-        else { std::env::remove_var("DAOZAI_DATA_DIR"); }
+        if let Some(old) = old { std::env::set_var("LINGDAO_DATA_DIR", old); }
+        else { std::env::remove_var("LINGDAO_DATA_DIR"); }
     }
 }
 

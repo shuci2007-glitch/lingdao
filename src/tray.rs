@@ -48,8 +48,8 @@ const CMD_SETTINGS:u32=6;
 const TIMER_MENU: usize = 12;
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const RUN_VALUE: PCWSTR = w!("Daozai");
-const MUTEX_NAME: PCWSTR = w!("Local\\Daozai.SingleInstance");
+const RUN_VALUE: PCWSTR = w!("Lingdao");
+const MUTEX_NAME: PCWSTR = w!("Local\\Lingdao.SingleInstance");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
@@ -377,7 +377,7 @@ impl Tray {
                     return;
                 };
                 let hinst = HINSTANCE(module.0);
-                let class = w!("DaozaiTray");
+                let class = w!("LingdaoTray");
                 let wc = WNDCLASSW {
                     style: WNDCLASS_STYLES(0),
                     lpfnWndProc: Some(wndproc),
@@ -619,6 +619,6 @@ mod tests {
 }
 
 /// 已有实例时打开其设置窗口。
-pub fn open_settings(){unsafe{if let Ok(hwnd)=FindWindowW(w!("DaozaiTray"),PCWSTR::null()){let _=PostMessageW(hwnd,WM_APP+4,WPARAM(0),LPARAM(0));}}}
+pub fn open_settings(){unsafe{if let Ok(hwnd)=FindWindowW(w!("LingdaoTray"),PCWSTR::null()){let _=PostMessageW(hwnd,WM_APP+4,WPARAM(0),LPARAM(0));}}}
 
-pub fn open_calendar(){unsafe{if let Ok(hwnd)=FindWindowW(w!("DaozaiTray"),PCWSTR::null()){let _=PostMessageW(hwnd,WM_APP+5,WPARAM(0),LPARAM(0));}}}
+pub fn open_calendar(){unsafe{if let Ok(hwnd)=FindWindowW(w!("LingdaoTray"),PCWSTR::null()){let _=PostMessageW(hwnd,WM_APP+5,WPARAM(0),LPARAM(0));}}}

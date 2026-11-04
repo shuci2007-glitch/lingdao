@@ -54,7 +54,7 @@ fn redirect_target(current:&str,location:&str)->Option<String>{
 fn request(agent:&ureq::Agent,url:&str,session:&Session)->Result<Snapshot,(String,u64)>{
     let mut current=url.to_owned();
     for _ in 0..3{
-    let response=agent.get(&current).set("Cookie",&session.cookie).set("Accept","application/json").set("Referer","https://gemini.google.com/usage").set("User-Agent","Mozilla/5.0 Daozai").call().map_err(|e|match e{
+    let response=agent.get(&current).set("Cookie",&session.cookie).set("Accept","application/json").set("Referer","https://gemini.google.com/usage").set("User-Agent","Mozilla/5.0 Lingdao").call().map_err(|e|match e{
         ureq::Error::Status(401|403,_)=>(LOGIN_ERROR.into(),0),
         ureq::Error::Status(429,r)=>("Gemini 请求过于频繁，稍后自动重试".into(),r.header("Retry-After").and_then(|s|s.parse().ok()).unwrap_or(180).clamp(30,3600)),
         ureq::Error::Status(n,_)=>(format!("Gemini 额度服务暂不可用（{n}）"),60),

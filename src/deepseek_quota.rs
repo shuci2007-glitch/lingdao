@@ -8,7 +8,7 @@ use super::{Account, Snapshot, Window};
 use serde_json::Value;
 use std::io::Read;
 
-const SERVICE: &str = "Daozai.DeepSeek";
+const SERVICE: &str = "Lingdao.DeepSeek";
 const ENDPOINT: &str = "https://api.deepseek.com/user/balance";
 const KEY_HINT: &str = "请在 DeepSeek 开放平台创建 API Key 后填到这里";
 
@@ -17,21 +17,16 @@ pub fn save_key(id: &str, key: &str) -> Result<(), String> {
     if key.len() < 8 || key.len() > 256 || key.chars().any(char::is_whitespace) {
         return Err("API Key 格式不正确".into());
     }
-    keyring::Entry::new(SERVICE, id)
-        .and_then(|entry| entry.set_password(key))
+    crate::secrets::set(SERVICE, id, key)
         .map_err(|e| format!("保存 API Key 失败：{e}"))
 }
 
 pub fn forget(account: &Account) {
-    if let Ok(entry) = keyring::Entry::new(SERVICE, &account.id) {
-        let _ = entry.delete_credential();
-    }
+    crate::secrets::delete(SERVICE, &account.id);
 }
 
 fn key(id: &str) -> Result<String, String> {
-    keyring::Entry::new(SERVICE, id)
-        .and_then(|entry| entry.get_password())
-        .map_err(|_| KEY_HINT.to_string())
+    crate::secrets::get(SERVICE, id).map_err(|_| KEY_HINT.to_string())
 }
 
 /// 账号 id 用 key 的 SHA-256 前 12 位，同一个 Key 重复添加只会得到同一个账号。
@@ -87,7 +82,7 @@ pub fn fetch(agent: &ureq::Agent, account: &Account) -> Result<Snapshot, (String
         .get(ENDPOINT)
         .set("Authorization", &format!("Bearer {key}"))
         .set("Accept", "application/json")
-        .set("User-Agent", "Daozai")
+        .set("User-Agent", "Lingdao")
         .call()
         .map_err(|error| match error {
             ureq::Error::Status(401 | 403, _) => ("API Key 无效或已被撤销，请重新填写".to_string(), 0),

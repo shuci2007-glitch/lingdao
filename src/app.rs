@@ -231,6 +231,22 @@ pub(crate) struct MailForm {
 impl MailState {
     /// 最近一封带验证码的邮件。
     pub fn code_item(&self) -> Option<&mail::Item> {self.recent.iter().find(|m|m.code.is_some())}
+    /// 从岛内列表删掉一封邮件：只动本地列表，不删服务器上的邮件。
+    pub fn dismiss(&mut self, account: &str, uid: u32) {
+        self.recent.retain(|m| m.uid != uid || !m.account.eq_ignore_ascii_case(account));
+        if self.open_uid.as_ref().is_some_and(|(a, u)| *u == uid && a.eq_ignore_ascii_case(account)) {
+            self.open_uid = None;
+        }
+        if self.reading.as_ref().is_some_and(|m| m.uid == uid && m.account.eq_ignore_ascii_case(account)) {
+            self.reading = None;
+        }
+    }
+    /// 清空岛内列表（含已打开的详情），服务器上的邮件不受影响。
+    pub fn clear(&mut self) {
+        self.recent.clear();
+        self.open_uid = None;
+        self.reading = None;
+    }
     pub fn status_of(&self, email: &str) -> mail::Status {
         self.status
             .get(&email.to_ascii_lowercase())

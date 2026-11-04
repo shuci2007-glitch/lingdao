@@ -22,7 +22,7 @@ fn message(directory: &Path, title: &str, details: &str) -> String {
 }
 
 pub fn report(title: &str, details: &str) {
-    let text = message(&daozai::model::config_dir().join("diagnostics"), title, details);
+    let text = message(&lingdao::model::config_dir().join("diagnostics"), title, details);
     #[cfg(windows)]
     {
         use windows::core::{w, PCWSTR};

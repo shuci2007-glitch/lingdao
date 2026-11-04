@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-pub const SERVICE: &str = "Daozai.Mail";
+pub const SERVICE: &str = "Lingdao.Mail";
 
 // ---------------------------------------------------------------- 邮箱类型
 
@@ -551,15 +551,12 @@ use crate::otp;
 pub mod secrets {
     /// 凭据只进 Windows 凭据管理器；键是邮箱地址，值是授权码。
     pub fn save(email: &str, password: &str) -> Result<(), String> {
-        let entry = keyring::Entry::new(super::SERVICE, &email.to_ascii_lowercase())
-            .map_err(|e| format!("凭据管理器不可用：{e}"))?;
-        entry.set_password(password).map_err(|e| format!("保存授权码失败：{e}"))
+        crate::secrets::set(super::SERVICE, &email.to_ascii_lowercase(), password)
+            .map_err(|e| format!("保存授权码失败：{e}"))
     }
 
     pub fn load(email: &str) -> Result<String, String> {
-        let entry = keyring::Entry::new(super::SERVICE, &email.to_ascii_lowercase())
-            .map_err(|e| format!("凭据管理器不可用：{e}"))?;
-        entry.get_password().map_err(|e| match e {
+        crate::secrets::get(super::SERVICE, &email.to_ascii_lowercase()).map_err(|e| match e {
             // 区分「从来没存过」和「存了但读不出来」，后者重填也救不了。
             keyring::Error::NoEntry => "还没有为这个邮箱保存过授权码".to_string(),
             _ => format!("读取授权码失败（凭据管理器被锁定或拒绝访问，重填无效）：{e}"),
@@ -567,9 +564,7 @@ pub mod secrets {
     }
 
     pub fn delete(email: &str) {
-        if let Ok(entry) = keyring::Entry::new(super::SERVICE, &email.to_ascii_lowercase()) {
-            let _ = entry.delete_credential();
-        }
+        crate::secrets::delete(super::SERVICE, &email.to_ascii_lowercase());
     }
 }
 

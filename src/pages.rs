@@ -785,6 +785,7 @@ impl App {
         content.spacing_mut().scroll.floating=false;
         content.spacing_mut().scroll.bar_width=4.0*c.s;
         content.visuals_mut().widgets.inactive.bg_fill=Color32::from_gray(80);
+        let mut dismiss: Option<(String, u32)> = None;
         egui::ScrollArea::vertical().id_salt("mail-list-scroll").max_height(86.0*c.s).auto_shrink([false,false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show_rows(&mut content,34.0*c.s,self.mail.recent.len(),|ui,range|{
             for item in &self.mail.recent[range] {
                 let (rect,_)=ui.allocate_exact_size(egui::vec2(186.0*c.s,34.0*c.s),egui::Sense::hover());
@@ -793,13 +794,35 @@ impl App {
                 let selected=code.as_ref().is_some_and(|m|m.uid==item.uid&&m.account.eq_ignore_ascii_case(&item.account));
                 if hit.hovered()||selected{row.fill(0.0,0.0,186.0,32.0,6.0,Color32::from_gray(if hit.hovered(){27}else{17}));}
                 if selected{row.fill(0.0,6.0,2.0,20.0,1.0,theme::GREEN);}
-                row.text(6.0,12.0,&row.fit(&item.from,11.5,W::Semibold,132.0),11.5,W::Semibold,theme::WHITE,H::Left);
-                row.text(180.0,12.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
-                row.text(6.0,27.0,&row.fit(&item.subject,10.5,W::Regular,174.0),10.5,W::Regular,Color32::from_gray(200),H::Left);
+                row.text(6.0,12.0,&row.fit(&item.from,11.5,W::Semibold,124.0),11.5,W::Semibold,theme::WHITE,H::Left);
+                row.text(152.0,12.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
+                row.text(6.0,27.0,&row.fit(&item.subject,10.5,W::Regular,166.0),10.5,W::Regular,Color32::from_gray(200),H::Left);
                 hit.clone().on_hover_text(format!("{}\n{}\n收件邮箱：{}\n{}",item.from,item.subject,item.account,item.time));
                 if hit.clicked(){self.mail.open_uid=Some((item.account.clone(),item.uid));}
+                // 每行右侧的删除键：单击只删这一封（放在行命中区之后注册，优先接住点击）。
+                let del=row.hit(158.0,4.0,26.0,24.0,("mail-del",item.uid,item.account.as_str()))
+                    .on_hover_text("从列表里删除这封邮件（不会删除服务器上的邮件）");
+                let tint=if del.hovered(){theme::accent()}else{Color32::from_gray(130)};
+                row.path(&[(162.0,11.5),(172.0,21.5)],1.2,tint);
+                row.path(&[(172.0,11.5),(162.0,21.5)],1.2,tint);
+                if del.clicked(){dismiss=Some((item.account.clone(),item.uid));}
             }
         });
+        if let Some((account,uid))=dismiss {
+            self.mail.dismiss(&account,uid);
+            // 被删的正好是岛上显示的验证码时一起撤掉，避免显示已删邮件的内容。
+            if self.code_seen.as_ref().is_some_and(|_| self.mail.code_item().is_none()) { self.code_seen=None; }
+        }
+        // 底部：数量 + 一键清空（只清本地列表与缓存，不动邮箱服务器）。
+        let total=self.mail.recent.len();
+        c.text(186.0,126.0,&format!("共 {total} 封"),9.5,W::Regular,theme::DIM,H::Left);
+        let clear=c.hit(340.0,119.0,44.0,18.0,"mail-clear");
+        c.text(380.0,126.0,"清空",9.5,W::Regular,if clear.hovered(){theme::accent()}else{Color32::from_gray(150)},H::Right);
+        if clear.clicked(){
+            self.mail.clear();
+            self.code_seen=None;
+            self.privacy=Default::default();
+        }
     }
 
     /// 岛内邮件详情可滚动，也可以进入独立窗口阅读全文。
@@ -855,8 +878,8 @@ impl App {
             let ignored=self.mail_event_ignored(m);
             c.text(46.0,y,&format!("{} · {}",if ignored{"已忽略"}else{"日程"},m.at),10.5,W::Regular,if ignored{theme::DIM}else{theme::GREEN},H::Left);
             let label=if ignored{"恢复日程"}else{"忽略日程"};
-            c.text(374.0,y,label,10.5,W::Regular,theme::GRAY,H::Right);
-            if c.hit(316.0,y-14.0,60.0,24.0,("mail-ignore-event",item.uid)).on_hover_text(&m.title).clicked(){self.toggle_mail_event(m);}
+            c.text(306.0,y,label,10.5,W::Regular,theme::GRAY,H::Right);
+            if c.hit(252.0,y-14.0,56.0,24.0,("mail-ignore-event",item.uid)).on_hover_text(&m.title).clicked(){self.toggle_mail_event(m);}
         } else if let Some(code) = &item.code {
             let hidden=self.settings.mail_code_hide && self.privacy.hidden(item,self.t,self.settings.mail_code_hide_seconds);
             let label = if hidden {"验证码 ••••••".to_string()} else {format!("验证码 {code}")};
@@ -867,6 +890,15 @@ impl App {
                 if hidden { self.privacy.reveal(item,self.t); }
                 else { cmds.push(Cmd::Copy(code.clone())); self.code_copied(code); }
             }
+        }
+        // 详情页右下：删掉这一封（只删本地列表，不动服务器）。
+        let del = c.hit(316.0, y - 14.0, 60.0, 24.0, ("mail-detail-del", item.uid))
+            .on_hover_text("从列表里删除这封邮件（不会删除服务器上的邮件）");
+        c.text(374.0, y, "删除", 10.5, W::Regular, if del.hovered() { Color32::from_rgb(235,120,120) } else { theme::DIM }, H::Right);
+        if del.clicked() {
+            let (account, uid) = (item.account.clone(), item.uid);
+            self.mail.dismiss(&account, uid);
+            if self.code_seen.as_ref().is_some_and(|_| self.mail.code_item().is_none()) { self.code_seen = None; }
         }
     }
 }
