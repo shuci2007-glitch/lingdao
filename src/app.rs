@@ -37,6 +37,9 @@ pub const BAR_H_MIN: f32 = 4.5;
 /// 空闲小药丸：比手动极简的细线更饱满，像真机灵动岛收起时那颗黑丸。
 pub const IDLE_PILL_W: f32 = 116.0;
 pub const IDLE_PILL_H: f32 = 13.0;
+/// 「水滴」形态收束到底时的尺寸：一颗小水珠贴在屏顶中央，像融入顶部。
+pub const IDLE_DROP_W: f32 = 14.0;
+pub const IDLE_DROP_H: f32 = 11.0;
 /// 灵动岛当前应呈现的形态（单一判定入口）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Present { Bar, Pill, Hidden }
@@ -499,6 +502,8 @@ pub struct App {
     near_top_now: bool,
     /// 在设置里切换空闲形态后，强制预览到该时刻，确保立刻可见。
     idle_preview_until: f64,
+    /// 「水滴」形态：收成小药丸后继续像水滴一样融入顶部的进度（0=药丸，1=完全融入）。
+    idle_drop: f32,
     /// 已播报过的活动签名，用来只在「新活动出现」时响一声。
     sound_sig: Vec<String>,
     sound_at: f64,
@@ -613,6 +618,7 @@ impl App {
             dnd_now: false,
             near_top_now: false,
             idle_preview_until: 0.0,
+            idle_drop: 0.0,
             dnd_cache: false,
             dnd_checked_at: 0.0,
             sound_sig: Vec::new(),
@@ -1183,7 +1189,7 @@ impl App {
     fn selected_raw(&self)->Present {
         match self.settings.idle_mode {
             model::IdleMode::Bar => Present::Bar,
-            model::IdleMode::Pill => Present::Pill,
+            model::IdleMode::Drop => Present::Pill,
             model::IdleMode::Hidden => Present::Hidden,
         }
     }
@@ -1243,7 +1249,17 @@ impl App {
         if self.island_lyrics_active() {
             (self.lyric_bar_width(),BAR_H)
         } else if self.effective_minimal() && (self.previewing() || self.t >= self.notification_bell_until) {
-            if self.thin_forced() { (BAR_W_MIN, BAR_H_MIN) } else { (IDLE_PILL_W, IDLE_PILL_H) }
+            if self.thin_forced() {
+                (BAR_W_MIN, BAR_H_MIN)
+            } else if self.idle_pill() {
+                // 水滴：先收成小药丸，再随 idle_drop 收成一颗小水珠融入顶部。
+                let e = smoothstep(0.0, 1.0, self.idle_drop);
+                let w = IDLE_PILL_W + (IDLE_DROP_W - IDLE_PILL_W) * e;
+                let h = IDLE_PILL_H + (IDLE_DROP_H - IDLE_PILL_H) * e;
+                (w, h)
+            } else {
+                (IDLE_PILL_W, IDLE_PILL_H)
+            }
         } else {
             (self.resident.target.width, BAR_H)
         }
@@ -1645,6 +1661,11 @@ impl App {
             || self.drag_hot
             || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
+        // 「水滴」融入动画：先收成小药丸、弹簧落定后，再缓缓收成小水珠融入顶部。
+        // 预览期间停在药丸态，方便用户在设置里看清选中的形态。
+        let settled = self.w.pos < IDLE_PILL_W + 4.0 && self.h.pos < IDLE_PILL_H + 4.0;
+        let drop_target = if !self.previewing() && self.idle_pill() && settled { 1.0 } else { 0.0 };
+        self.idle_drop = anim::approach(self.idle_drop, drop_target, 2.6, dt);
         // 展开瞬间：播放「啵」一声。
         if self.open && !self.was_open && self.settings.sound && !self.dnd_now {
             sfx::play(sfx::Sfx::Boop);

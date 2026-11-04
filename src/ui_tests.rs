@@ -3477,7 +3477,7 @@ fn mail_report_save_and_failure_paths() {
 fn idle_mode_pill_and_hidden_take_effect() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     let mut h=H::new();
-    h.app.settings.idle_mode=crate::model::IdleMode::Pill;
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
     for _ in 0..180 { h.frame(vec![]); }
     assert!(h.app.current_width() < 140.0, "pill 宽度应收缩，实际 {}", h.app.current_width());
     assert!(h.region.width() < 160.0, "pill 区域应小，实际 {}", h.region.width());
@@ -3495,7 +3495,7 @@ fn idle_mode_pill_and_hidden_take_effect() {
     // 后台有活动（如验证码/媒体/专注）时也应按用户选择收缩——
     // 这是之前「自动小药丸 / 完全隐入 没反应」的根因回归测试。
     let mut h=H::new();
-    h.app.settings.idle_mode=crate::model::IdleMode::Pill;
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
     h.app.code_seen=Some(("123456".into(),0.0));
     for _ in 0..180 { h.frame(vec![]); }
     assert!(h.app.current_width() < 140.0, "有后台活动时也应缩成药丸，实际 {}", h.app.current_width());
@@ -3523,13 +3523,13 @@ fn manual_minimal_does_not_override_pill_and_tap_opens_island() {
     // 开了「极简刘海」时，用户选「自动小药丸」仍应是药丸（不能被细线覆盖）。
     let mut h=H::new();
     h.app.settings.minimal=true;
-    h.app.settings.idle_mode=crate::model::IdleMode::Pill;
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
     for _ in 0..180 { h.frame(vec![]); }
     assert!(h.app.current_width() < 140.0, "小药丸不应被极简刘海覆盖，实际 {}", h.app.current_width());
 
     // 开着「自动避让」且浏览器在前台时，选小药丸也不能被压成细线。
     let mut h=H::new();
-    h.app.settings.idle_mode=crate::model::IdleMode::Pill;
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
     h.app.settings.browser_minimal=true;
     h.browser_at_top=Some(true);
     for _ in 0..120 { h.frame(vec![]); }

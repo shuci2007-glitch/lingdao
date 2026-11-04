@@ -704,12 +704,12 @@ pub(crate) fn setting_row(ui:&mut egui::Ui,title:&str,description:&str,value:&mu
         switch(ui,value);
     });
 }
-/// 三态选择行（自动小药丸 / 带宠物和状态的黑条 / 完全隐入）。
+/// 三态选择行（水滴 / 带宠物和状态的黑条 / 完全隐入）。
 pub(crate) fn setting_idle_row(ui:&mut egui::Ui, value:&mut crate::model::IdleMode) {
     let ctx=ui.ctx().clone();
     ui.vertical(|ui|{
         ui.label(egui::RichText::new("空闲时显示").size(13.0).color(settings_color(&ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
-        ui.label(egui::RichText::new("没有活动时灵岛的样子；鼠标贴近屏顶会临时冒头，方便随时唤起")
+        ui.label(egui::RichText::new("没有活动时灵岛的样子；「水滴」会先收成小药丸、再像水滴一样融入顶部。鼠标贴近屏顶会临时冒头，方便随时唤起")
             .size(11.5).color(settings_color(&ctx,Color32::from_gray(195),Color32::from_gray(60))));
         ui.add_space(4.0);
         egui::Frame::new()
@@ -718,7 +718,7 @@ pub(crate) fn setting_idle_row(ui:&mut egui::Ui, value:&mut crate::model::IdleMo
             .show(ui,|ui|{
                 ui.spacing_mut().item_spacing.x=2.0;
                 ui.horizontal(|ui|{
-                    for mode in [crate::model::IdleMode::Pill, crate::model::IdleMode::Bar, crate::model::IdleMode::Hidden] {
+                    for mode in [crate::model::IdleMode::Drop, crate::model::IdleMode::Bar, crate::model::IdleMode::Hidden] {
                         let selected=*value==mode;
                         let button=egui::Button::new(egui::RichText::new(mode.label()).size(11.5)
                             .color(if selected{settings_color(&ctx,Color32::WHITE,Color32::from_rgb(30,34,41))}else{settings_color(&ctx,Color32::from_gray(210),Color32::from_gray(55))}))

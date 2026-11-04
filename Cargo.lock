@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "lingdao"
-version = "0.6.52"
+version = "0.6.53"
 dependencies = [
  "base64 0.22.1",
  "chrono",

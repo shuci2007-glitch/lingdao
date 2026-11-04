@@ -1,4 +1,4 @@
-use daozai::model::Settings;
+use lingdao::model::Settings;
 
 #[test]
 fn legacy_material_settings_are_retired() {

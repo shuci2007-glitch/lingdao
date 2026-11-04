@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use daozai::calendar::{self, Config, Provider};
+use lingdao::calendar::{self, Config, Provider};
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
