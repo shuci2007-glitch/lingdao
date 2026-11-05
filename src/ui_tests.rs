@@ -3600,6 +3600,21 @@ fn idle_drop_collapses_into_a_droplet_and_merges_into_the_top_edge() {
     assert!(h.app.drop_progress() < 0.2, "贴顶后应回落，实际 {}", h.app.drop_progress());
 }
 
+/// 圆点融入屏顶的瞬间应溅起「涟漪 + 反弹小水滴」水花，且完全融入后自然散尽、不反复重溅。
+#[test]
+fn idle_drop_splash_ripples_on_merge() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    h.app.settings.idle_mode=crate::model::IdleMode::Drop;
+    let mut max_splash=0.0f32;
+    for _ in 0..270 { h.frame(vec![]); max_splash=max_splash.max(h.app.splash_progress()); }
+    assert!(h.app.drop_progress() > 0.95, "应融入屏顶");
+    assert!(max_splash > 0.5, "融入屏顶应溅起涟漪+反弹小水滴，实测峰值 {}", max_splash);
+    // 完全融入后水花应自然散尽，不再持续重溅。
+    for _ in 0..60 { h.frame(vec![]); }
+    assert!(h.app.splash_progress() < 0.01, "融入后水花应散尽，实测 {}", h.app.splash_progress());
+}
+
 /// 调试用：把「圆点」动画的若干帧软光栅化成 PPM，肉眼确认它真的被屏顶吸走。
 /// 默认 ignore；需要时 `cargo test --lib dump_drop_frames -- --ignored --nocapture`。
 #[test]

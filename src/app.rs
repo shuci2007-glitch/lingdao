@@ -510,6 +510,10 @@ pub struct App {
     /// 圆点融入后「回落」状态位：光标贴顶时置位，让圆点重新出现供交互；
     /// 离开屏顶才清除。用独立状态位避免在 idle_drop≈1 与 <1 之间来回振荡。
     idle_drop_recede: bool,
+    /// 圆点被屏顶吸进去的瞬间触发的「水花」动画进度（1→0 衰减）：涟漪 + 反弹小水滴。
+    idle_splash: f32,
+    /// 本次「融入」是否已触发过水花，防止已完全融入后重复溅起。
+    idle_splashed: bool,
     /// 已播报过的活动签名，用来只在「新活动出现」时响一声。
     sound_sig: Vec<String>,
     sound_at: f64,
@@ -626,6 +630,8 @@ impl App {
             idle_preview_until: 0.0,
             idle_drop: 0.0,
             idle_drop_recede: false,
+            idle_splash: 0.0,
+            idle_splashed: false,
             dnd_cache: false,
             dnd_checked_at: 0.0,
             sound_sig: Vec::new(),
@@ -1243,6 +1249,8 @@ impl App {
         // 每次在设置里点选都从头播一遍：收成圆点 → 被屏顶吸进去，方便反复确认效果。
         self.idle_drop = 0.0;
         self.idle_drop_recede = false;
+        self.idle_splash = 0.0;
+        self.idle_splashed = false;
         // 手动「极简刘海」会覆盖「黑条」，切换时顺手关掉，避免用户以为设置没生效。
         self.settings.minimal = false;
     }
@@ -1288,6 +1296,9 @@ impl App {
     /// 圆点被屏顶吸走的进度：0 = 完整圆点，1 = 已完全融入屏顶。
     #[cfg(test)]
     pub(crate) fn drop_progress(&self) -> f32 { self.idle_drop }
+    /// 融入时触发的水花动画进度：1 = 刚溅起，0 = 已散尽。仅供测试观测。
+    #[cfg(test)]
+    pub(crate) fn splash_progress(&self) -> f32 { self.idle_splash }
 
     pub fn progress(&self) -> f32 {
         let (_, bh) = self.base_size();
@@ -1711,6 +1722,19 @@ impl App {
         } else {
             self.idle_drop = anim::approach(self.idle_drop, 0.0, 6.0, dt);
         }
+        // 圆点被吸进屏顶、与「水面」接触的瞬间，触发一次性水花（涟漪 + 反弹小水滴）。
+        const SPLASH_AT: f32 = 0.66;
+        const SPLASH_RESET: f32 = 0.25;
+        if !self.idle_splashed && self.idle_drop >= SPLASH_AT && drop_target >= 1.0 {
+            self.idle_splash = 1.0;
+            self.idle_splashed = true;
+        }
+        if self.idle_drop < SPLASH_RESET {
+            self.idle_splashed = false;
+        }
+        if self.idle_splash > 0.0 {
+            self.idle_splash = (self.idle_splash - dt / 0.9).max(0.0);
+        }
         // 展开瞬间：播放「啵」一声。
         if self.open && !self.was_open && self.settings.sound && !self.dnd_now {
             sfx::play(sfx::Sfx::Boop);
@@ -1735,7 +1759,7 @@ impl App {
         let panel0 = Rect::from_min_size(Pos2::new(cx - w / 2.0, top - sink), Vec2::new(w, h));
         let panel = Rect::from_center_size(panel0.center(), panel0.size() * (if self.open { 1.0 } else { 1.0 + 0.06 * self.peek.pos }));
         let pc = anim::clamp01(p);
-        let painter = ui.painter_at(ui.max_rect().expand(40.0));
+        let painter = ui.painter_at(ui.max_rect().expand(90.0));
         let feather = 1.0 / ctx.pixels_per_point();
         let flare = if minimal_pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
@@ -1751,7 +1775,7 @@ impl App {
         let notice_shape=if self.side_slot.is_none() { notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max)) } else { None };
         if let Some(r)=notice_shape {shape::shadow(&painter,r,5.0,8.0,12.5,0.5*shadow_k);}
         if drop_visual {
-            Self::paint_drop(&painter, cx, top, w, h, de);
+            Self::paint_drop(&painter, cx, top, w, h, de, self.idle_splash);
         } else {
             shape::fill(&painter, panel, flare, flare_h, radius, Color32::BLACK, feather);
         }
@@ -1989,13 +2013,62 @@ impl App {
 
     /// 画一颗贴在屏顶的正圆小黑丸——iPhone 灵动岛收束后的样子。
     /// `de` 是吸入进度：0 = 完整圆点，1 = 已被屏顶吞掉；中途整体加速上移并淡出。
-    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32) {
-        let alpha = (1.0 - smoothstep(0.56, 0.97, de)).clamp(0.0, 1.0);
-        if alpha <= 0.004 { return; }
+    /// 圆点形态的水滴：被屏顶吸进去时，像水滴落入水面——主体边收边淡出，
+    /// 接触瞬间在「水面」(屏顶) 溅起压扁的涟漪，并反弹一颗小水滴上抛再落回融入。
+    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32) {
         let r = (w.min(h) / 2.0).max(1.0);
-        let sink = de * (h + 6.0);
-        let cy = top - sink + h / 2.0;
-        painter.circle_filled(Pos2::new(cx, cy), r, Color32::from_black_alpha((alpha * 255.0) as u8));
+        // 主体：边被吸进屏顶边淡出。
+        let main_alpha = (1.0 - smoothstep(0.56, 0.97, de)).clamp(0.0, 1.0);
+        if main_alpha > 0.004 {
+            let sink = de * (h + 6.0);
+            let cy = top - sink + h / 2.0;
+            painter.circle_filled(
+                Pos2::new(cx, cy),
+                r,
+                Color32::from_black_alpha((main_alpha * 255.0) as u8),
+            );
+        }
+        // 水花：涟漪 + 反弹小水滴。
+        if splash > 0.001 {
+            let local = 1.0 - splash; // 0=刚接触，1=水花散尽
+            // 涟漪：以「水面」(cx, top) 为中心、压扁的椭圆，逐圈向外扩散并淡出。
+            const RIPPLES: usize = 2;
+            let ripple_color = |a: f32| -> Color32 {
+                Color32::from_rgba_unmultiplied(150, 220, 255, (a.clamp(0.0, 1.0) * 255.0) as u8)
+            };
+            for i in 0..RIPPLES {
+                let ph = (local - i as f32 * 0.16).clamp(0.0, 1.0);
+                if ph <= 0.001 {
+                    continue;
+                }
+                let rx = (ph * r * 6.0).max(1.0);
+                let ry = rx * 0.32; // 水面视角，纵向压扁
+                let a = (1.0 - ph) * 0.55;
+                if a <= 0.004 {
+                    continue;
+                }
+                painter.add(egui::epaint::EllipseShape::stroke(
+                    Pos2::new(cx, top),
+                    Vec2::new(rx, ry),
+                    egui::Stroke::new(1.5_f32, ripple_color(a)),
+                ));
+            }
+            // 反弹小水滴：从水面抛出、上抛到顶点再落回融入（正弦弧线）。
+            let apex = r * 2.6;
+            let sinv = (std::f32::consts::PI * local).sin().max(0.0);
+            let y = top - apex * sinv;
+            let x = cx + r * 0.6 * (local - 0.5) * 2.0; // 轻微横向漂移
+            let merge = smoothstep(0.72, 1.0, local); // 末段缩并融入
+            let rs = (r * 0.42 * (1.0 - merge)).max(0.0);
+            let a = (1.0 - smoothstep(0.85, 1.0, local)).clamp(0.0, 1.0);
+            if a > 0.004 && rs > 0.3 {
+                painter.circle_filled(
+                    Pos2::new(x, y),
+                    rs,
+                    Color32::from_black_alpha((a * 255.0) as u8),
+                );
+            }
+        }
     }
 
     /// 悬停状态机：意图缓冲 → 弹簧展开 → 离开延迟 → 临界阻尼收起；全程可打断。
