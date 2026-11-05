@@ -1366,7 +1366,13 @@ impl<T: Read + Write> Connection<T> {
                             ..
                         },
                     )) => {
-                        assert_eq!(tag.as_bytes(), match_tag.as_bytes());
+                        // 服务器返回的 tag 和当前命令不一致：通常是上一条命令的响应滞留
+                        //（例如 IDLE 的 DONE 在读取超时之后才到），或连接已被对端重置。
+                        // 这里必须报错让上层断开重连，绝不能 panic —— 后台收信线程一旦 panic，
+                        // 会触发诊断弹窗并反复堆积，把整个桌面拖到卡死。
+                        if tag.as_bytes() != match_tag.as_bytes() {
+                            break Err(Error::ConnectionLost);
+                        }
                         Some(match status {
                             Status::Bad | Status::No => {
                                 Err((status, information.map(ToString::to_string)))

@@ -35,13 +35,27 @@ pub fn report(title: &str, details: &str) {
 }
 
 pub fn install() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // 后台线程可能反复 panic（例如网络连接状态错乱时每轮重连都踩一次）。
+    // 每 panic 一次就弹一个模态框，会迅速把桌面堆满、表现为整机卡死，
+    // 所以只在第一次完整提示，之后仅落盘，不再弹窗。
+    static REPORTED: AtomicBool = AtomicBool::new(false);
     std::panic::set_hook(Box::new(|info| {
         // 不写入 panic 的数据载荷，避免把邮件、凭据或登录信息带进日志。
         let location = info.location().map(|p| format!("{}:{}:{}", p.file(), p.line(), p.column()))
             .unwrap_or_else(|| "未知".into());
-        report("灵岛发生异常，请重新启动。", &format!(
+        let details = format!(
             "代码位置：{location}\n调用栈：\n{}", std::backtrace::Backtrace::force_capture(),
-        ));
+        );
+        if REPORTED.swap(true, Ordering::SeqCst) {
+            let _ = write_report(
+                &lingdao::model::config_dir().join("diagnostics"),
+                "灵岛发生异常（重复异常，仅记录不再弹窗）",
+                &details,
+            );
+        } else {
+            report("灵岛发生异常，请重新启动。", &details);
+        }
     }));
 }
 
