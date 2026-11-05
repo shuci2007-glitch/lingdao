@@ -64,7 +64,10 @@ impl DragCapture {
         };
         let origin=*self.origin.get_or_insert(cursor);
         self.moved|=(cursor.0-origin.0).abs()>threshold.0 || (cursor.1-origin.1).abs()>threshold.1;
-        self.moved && zone.is_some_and(|(l,t,r,b)|cursor.0>=l && cursor.0<r && cursor.1>=t && cursor.1<b)
+        let inside=|(x,y):(i32,i32)|zone.is_some_and(|(l,t,r,b)|x>=l && x<r && y>=t && y<b);
+        // 只接收从感应区外拖进来的文件：在岛下方的标签栏里按下（含连续点击、拖标签、选文字）
+        // 不能扩大窗口区域，否则 HTTRANSPARENT 拦不住跨进程点击，下层窗口会点不动。
+        self.moved && !inside(origin) && inside(cursor)
     }
 }
 
@@ -296,6 +299,16 @@ mod tests {
         assert!(!capture.update(true,Some((300,60)),zone,(4,4)),"感应区内按下不能直接扩大窗口");
         assert!(!capture.update(true,Some((302,61)),zone,(4,4)),"点击时的小幅抖动不算拖动");
         assert!(!capture.update(false,Some((302,61)),zone,(4,4)));
+    }
+
+    #[test]
+    fn pressing_below_the_island_never_starts_a_file_drag() {
+        // 极简刘海/自动避让时岛下方会留出感应区：在那里按下（点标签、拖标签、选文字）
+        // 不能被当成「拖文件进来」，否则窗口区域被扩大，下层窗口就点不动了。
+        let mut capture=DragCapture::default();let zone=Some((110,0,530,120));
+        assert!(!capture.update(true,Some((380,60)),zone,(4,4)),"感应区内按下不算拖入");
+        assert!(!capture.update(true,Some((300,60)),zone,(4,4)),"在岛下方连续点击不同标签不能被当成拖文件");
+        assert!(!capture.update(true,Some((520,110)),zone,(4,4)),"感应区内移动仍不算拖入");
     }
 
     #[test]

@@ -265,13 +265,32 @@ unsafe fn update_window_region(rect: egui::Rect, scale: f32) -> windows::Win32::
     )
 }
 
+/// 更新用的 HTTP 客户端：优先用环境变量里的代理，其次用 Windows 系统代理。
+/// 国内不少机器挂着 Clash 之类的系统代理，不读代理会一直卡在「无法连接更新服务」。
+fn update_agent(proxy: Option<&str>, timeout: Duration) -> Result<ureq::Agent, String> {
+    // 整体 timeout 会覆盖读取超时，分别限制连接和无数据等待。
+    let mut builder = ureq::AgentBuilder::new().try_proxy_from_env(false)
+        .timeout_connect(Duration::from_secs(20)).timeout_read(timeout).timeout_write(timeout);
+    if let Some(proxy) = proxy {
+        builder = builder.proxy(ureq::Proxy::new(proxy).map_err(|_| "代理地址无效，请检查代理设置后重试")?);
+    }
+    Ok(builder.build())
+}
+
+fn http_agent() -> Result<ureq::Agent, String> {
+    let proxy = ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"]
+        .iter().find_map(|key| std::env::var(key).ok().filter(|value| !value.trim().is_empty()))
+        .or_else(crate::quota::system_proxy);
+    update_agent(proxy.as_deref(), Duration::from_secs(15))
+}
+
 fn check() -> Result<Option<Release>, String> {
-    let response = ureq::AgentBuilder::new().timeout(Duration::from_secs(15)).build()
+    let response = http_agent()?
         .get(API).set("User-Agent", concat!("Lingdao/", env!("CARGO_PKG_VERSION")))
         .set("Accept", "application/vnd.github+json").call().map_err(|error| match error {
             ureq::Error::Status(403 | 429, _) => "检查过于频繁，请稍后重试".to_owned(),
             ureq::Error::Status(404, _) => "暂未找到正式版本，请查看发布页".to_owned(),
-            _ => "无法连接更新服务，请检查网络后重试".to_owned(),
+            _ => "无法连接更新服务，请检查网络或代理后重试".to_owned(),
         })?;
     let value: serde_json::Value = serde_json::from_reader(response.into_reader())
         .map_err(|_| "更新信息格式异常，请稍后重试".to_owned())?;
@@ -300,8 +319,8 @@ fn download(release: &Release, tx: &mpsc::Sender<Event>, cancel: &AtomicBool) ->
     let work = root.join(format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
     std::fs::create_dir_all(&work).map_err(|_| "无法创建更新缓存")?;
     let result = (|| {
-        let response = ureq::AgentBuilder::new().timeout(Duration::from_secs(600)).timeout_read(Duration::from_secs(15)).build()
-            .get(&package.url).call().map_err(|_| "下载失败，请检查网络后重试")?;
+        let response = http_agent()?
+            .get(&package.url).call().map_err(|_| "下载失败，请检查网络或代理后重试")?;
         if !response.get_url().starts_with("https://") { return Err("更新下载未使用安全连接".into()); }
         let mut input = response.into_reader();
         let mut output = std::fs::File::create(work.join("update.zip")).map_err(|_| "无法保存更新包")?;
