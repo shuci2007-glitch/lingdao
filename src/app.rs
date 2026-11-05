@@ -2014,7 +2014,7 @@ impl App {
     /// 画一颗贴在屏顶的正圆小黑丸——iPhone 灵动岛收束后的样子。
     /// `de` 是吸入进度：0 = 完整圆点，1 = 已被屏顶吞掉；中途整体加速上移并淡出。
     /// 圆点形态的水滴：被屏顶吸进去时，像水滴落入水面——主体边收边淡出，
-    /// 接触瞬间在「水面」(屏顶) 溅起压扁的涟漪，并反弹一颗小水滴上抛再落回融入。
+    /// 接触瞬间在「水面」(屏顶) 溅起压扁的涟漪波纹，上部再分离一颗小水滴逐渐融入顶部。
     fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32) {
         let r = (w.min(h) / 2.0).max(1.0);
         // 主体：边被吸进屏顶边淡出。
@@ -2053,17 +2053,17 @@ impl App {
                     egui::Stroke::new(1.5_f32, ripple_color(a)),
                 ));
             }
-            // 反弹小水滴：从水面抛出、上抛到顶点再落回融入（正弦弧线）。
-            let apex = r * 2.6;
-            let sinv = (std::f32::consts::PI * local).sin().max(0.0);
-            let y = top - apex * sinv;
-            let x = cx + r * 0.6 * (local - 0.5) * 2.0; // 轻微横向漂移
-            let merge = smoothstep(0.72, 1.0, local); // 末段缩并融入
-            let rs = (r * 0.42 * (1.0 - merge)).max(0.0);
-            let a = (1.0 - smoothstep(0.85, 1.0, local)).clamp(0.0, 1.0);
+            // 上部小水滴：从圆点上半部分离，向上抬升并缩小，逐渐融入顶部。
+            // 窗口只有圆点那么高（top 就是屏幕顶），越过 top 就被裁掉，
+            // 所以不能走正弦大弧线——那会整颗飞到屏幕外，什么都看不见。
+            // 这里让它在可见区里从圆点上方升起、穿过水面、缩小消失。
+            let rise = smoothstep(0.06, 0.92, local);
+            let y = top + h * 0.44 - h * 1.02 * rise;
+            let rs = (r * 0.40 * (1.0 - smoothstep(0.34, 1.0, local))).max(0.0);
+            let a = (1.0 - smoothstep(0.62, 0.98, local)).clamp(0.0, 1.0);
             if a > 0.004 && rs > 0.3 {
                 painter.circle_filled(
-                    Pos2::new(x, y),
+                    Pos2::new(cx, y),
                     rs,
                     Color32::from_black_alpha((a * 255.0) as u8),
                 );
