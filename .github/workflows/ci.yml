@@ -18,9 +18,9 @@ jobs:
       - name: 构建并检查发布运行库
         shell: pwsh
         run: |
-          cargo +stable build --locked --release --bin daozai --target x86_64-pc-windows-msvc
+          cargo +stable build --locked --release --bin lingdao --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw '发布构建失败' }
-          ./scripts/check-runtime.ps1 -Executable ./target/x86_64-pc-windows-msvc/release/daozai.exe
+          ./scripts/check-runtime.ps1 -Executable ./target/x86_64-pc-windows-msvc/release/lingdao.exe
       - name: 检查安装脚本语法
         shell: pwsh
         run: |

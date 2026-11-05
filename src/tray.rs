@@ -364,13 +364,23 @@ pub struct Tray {
 }
 
 impl Tray {
+    /// 启动失败时，若托盘窗口已经建起来，发 WM_CLOSE 让它自行拆图标、退消息循环；
+    /// 否则后台线程在发送 ready 失败时已经自行返回，不会泄漏。
+    fn abort_tray() {
+        unsafe {
+            if let Ok(hwnd) = FindWindowW(w!("LingdaoTray"), PCWSTR::null()) {
+                let _ = PostMessageW(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
+
     pub fn start(state: State) -> Option<Self> {
         let shared = Arc::new(Mutex::new(state));
         let (event_tx, event_rx) = channel();
         let (ready_tx, ready_rx) = channel();
         let thread_state = shared.clone();
         let thread = std::thread::Builder::new()
-            .name("daozai-tray".into())
+            .name("lingdao-tray".into())
             .spawn(move || unsafe {
                 let Ok(module) = GetModuleHandleW(None) else {
                     let _ = ready_tx.send(Err("GetModuleHandleW 失败".to_string()));
@@ -447,10 +457,12 @@ impl Tray {
             Ok(Ok(v)) => v,
             Ok(Err(e)) => {
                 eprintln!("tray: {e}");
+                Self::abort_tray();
                 return None;
             }
             Err(_) => {
                 eprintln!("tray: 启动超时");
+                Self::abort_tray();
                 return None;
             }
         };

@@ -1,11 +1,12 @@
 ﻿//! 持久化与状态模型。
 //!
-//! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），但默认目录
-//! 用独立的 `%APPDATA%\Daozai`，避免与原工具的 `%APPDATA%\Nusa` 互相覆盖：
-//!   %APPDATA%\Daozai\settings.txt   -> pet=0/1, minimal=0/1
-//!   %APPDATA%\Daozai\todo.txt
-//!   %APPDATA%\Daozai\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
-//!   %APPDATA%\Daozai\shelf.txt      -> 置物清单（每行一个绝对路径）
+//! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），默认目录
+//! 用独立的 `%APPDATA%\Lingdao`；v0.6.52 之前的 `%APPDATA%\Daozai` 会在首次启动时
+//! 整体迁移过来（只复制不删除，旧版本若被重新打开仍能读到自己那份，用户不会丢设置）：
+//!   %APPDATA%\Lingdao\settings.txt   -> pet=0/1, minimal=0/1
+//!   %APPDATA%\Lingdao\todo.txt
+//!   %APPDATA%\Lingdao\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
+//!   %APPDATA%\Lingdao\shelf.txt      -> 置物清单（每行一个绝对路径）
 //!
 //! 设置环境变量 `LINGDAO_DATA_DIR`（旧名 `DAOZAI_DATA_DIR` 仍兼容）可把以上目录整体改到别处（用于与已安装的
 //! 原工具并存、或跑测试时不碰真实数据）。
@@ -30,27 +31,73 @@ pub fn config_dir() -> PathBuf {
 
 /// v0.6.52 改名前配置放在 `%APPDATA%\Daozai`。首次运行时整体复制到新目录，
 /// 只复制不删除——旧版本若被重新打开仍能读到自己那份，用户不会丢设置。
+///
+/// 用「迁移完成标记文件」判断，而不是 `Once` + `new.exists()`：
+/// - `Once` 一旦触发就不会重试，迁移中途失败会被永久吞掉；
+/// - `new.exists()` 在部分迁移后也会短路，导致永远补不完。
+/// 改为：每次启动都尝试把旧目录里「新目录还没有」的文件补齐，全部成功才写标记；
+/// 任一步失败则不加标记，下次启动自动重试。
 fn migrate_legacy_config(new: &Path) {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let old = env_dir("APPDATA").join("Daozai");
-        if new.exists() || !old.is_dir() { return; }
-        let _ = copy_tree(&old, new);
-    });
+    const MARKER: &str = ".migrated_from_daozai";
+    let marker = new.join(MARKER);
+    if marker.exists() {
+        return; // 已迁移完成
+    }
+    let old = env_dir("APPDATA").join("Daozai");
+    if !old.is_dir() {
+        // 没有旧数据可迁移；写个标记，避免每次启动都去探测旧目录。
+        let _ = fs::write(&marker, b"");
+        return;
+    }
+    // 只填补缺失文件：已存在于新目录的不覆盖，保留用户在新位置的修改。
+    if copy_tree_missing(&old, new).is_ok() {
+        let _ = fs::write(&marker, b"");
+    }
+    // 失败则不加标记，下次启动重试。
 }
 
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+/// 把 `from` 里「`to` 还没有」的文件复制过去（已存在的保留，不覆盖）。
+/// 单文件失败会冒泡成 `Err`，让整次迁移失败以便重试。
+fn copy_tree_missing(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            let _ = fs::copy(entry.path(), target);
+            copy_tree_missing(&entry.path(), &target)?;
+        } else if !target.exists() {
+            fs::copy(entry.path(), &target)?;
         }
     }
     Ok(())
+}
+
+/// 已忽略（本地删除）的邮件 uid，按账号小写聚合，避免重启后再次从服务器拉回。
+pub fn load_dismissed() -> std::collections::HashMap<String, std::collections::HashSet<u32>> {
+    use std::collections::{HashMap, HashSet};
+    let mut map: HashMap<String, HashSet<u32>> = HashMap::new();
+    if let Ok(text) = fs::read_to_string(config_dir().join("mail_dismissed.txt")) {
+        for line in text.lines() {
+            if let Some((account, uid)) = line.split_once(':') {
+                if let Ok(uid) = uid.trim().parse::<u32>() {
+                    map.entry(account.trim().to_ascii_lowercase()).or_default().insert(uid);
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 把已忽略的邮件 uid 落盘（尽力而为，写失败不影响内存状态）。
+pub fn save_dismissed(dismissed: &std::collections::HashMap<String, std::collections::HashSet<u32>>) {
+    let mut lines: Vec<String> = Vec::new();
+    for (account, uids) in dismissed {
+        for uid in uids {
+            lines.push(format!("{}:{}", account, uid));
+        }
+    }
+    lines.sort();
+    let _ = atomic_write(&config_dir().join("mail_dismissed.txt"), lines.join("\n").as_bytes());
 }
 
 fn read_kv(path: &Path) -> Vec<(String, String)> {

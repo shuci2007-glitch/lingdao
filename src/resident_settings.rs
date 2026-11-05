@@ -59,7 +59,7 @@ impl crate::app::App {
                 QUOTA if count>0=>self.draw_quota_bar(&c,cx,&layout),
                 _=>{c.ring(x,15.0,10.0,2.0,theme::GRAY);c.text(x,18.0,"AI",7.0,W::Bold,theme::WHITE,H::Center);},
             }
-            if is_dragged {ui.painter().line_segment([Pos2::new(rect.center().x,body.bottom()+6.0),Pos2::new(rect.center().x,body.bottom()+12.0)],egui::Stroke::new(2.0,theme::accent()));}
+            if is_dragged {ui.painter().line_segment([Pos2::new(rect.center().x,body.bottom()+6.0),Pos2::new(rect.center().x,body.bottom()+12.0)],egui::Stroke::new(2.0_f32,theme::accent()));}
             response.on_hover_text(label(slot));
         }
         if let Some((slot,index))=movement{

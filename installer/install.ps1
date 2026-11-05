@@ -1,20 +1,24 @@
 ﻿param([string]$SourceExecutable)
 if(-not $SourceExecutable){
-    $packaged=Join-Path $PSScriptRoot '..\daozai.exe'
-    $SourceExecutable=if(Test-Path -LiteralPath $packaged){$packaged}else{Join-Path $PSScriptRoot '..\target\release\daozai.exe'}
+    $packaged=Join-Path $PSScriptRoot '..\lingdao.exe'
+    $SourceExecutable=if(Test-Path -LiteralPath $packaged){$packaged}else{Join-Path $PSScriptRoot '..\target\release\lingdao.exe'}
 }
 $ErrorActionPreference='Stop'
 $sourcePath=[System.IO.Path]::GetFullPath($SourceExecutable)
 if(-not(Test-Path -LiteralPath $sourcePath)){throw '找不到灵岛程序，请先完成构建。'}
-$installDir=Join-Path $env:LOCALAPPDATA 'Programs\Daozai'
-$exePath=Join-Path $installDir 'daozai.exe'
+$installDir=Join-Path $env:LOCALAPPDATA 'Programs\Lingdao'
+$exePath=Join-Path $installDir 'lingdao.exe'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-Get-Process daozai -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exePath} | ForEach-Object {
-    $null=$_.CloseMainWindow()
-    if(-not $_.WaitForExit(3000)){Stop-Process -Id $_.Id; $_.WaitForExit()}
+# 先关闭可能正在运行的旧进程（含改名前残留的 daozai），避免文件被锁。
+foreach($p in @('lingdao','daozai')){
+    Get-Process $p -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $installDir ($p+'.exe'))} | ForEach-Object {
+        $null=$_.CloseMainWindow()
+        if(-not $_.WaitForExit(3000)){Stop-Process -Id $_.Id; $_.WaitForExit()}
+    }
 }
-if(Test-Path -LiteralPath $exePath){Copy-Item -LiteralPath $exePath -Destination (Join-Path $installDir 'daozai-previous.exe') -Force}
-Copy-Item -LiteralPath $sourcePath -Destination $exePath -Force
+# 用文件替换而非直接覆盖，规避仍在被占用的情况。
+if(Test-Path -LiteralPath $exePath){[IO.File]::Replace($sourcePath,$exePath,$null)}
+else{Copy-Item -LiteralPath $sourcePath -Destination $exePath -Force}
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt') -Destination (Join-Path $installDir 'THIRD_PARTY_NOTICES.txt') -Force}
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $installDir 'LICENSE') -Force}
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'uninstall.ps1') -Destination (Join-Path $installDir 'uninstall.ps1') -Force
@@ -22,18 +26,21 @@ $shell=New-Object -ComObject WScript.Shell
 $entries=@(
     @((Join-Path $shell.SpecialFolders.Item('Desktop') '灵岛.lnk'),''),
     @((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\灵岛.lnk'),''),
-    @((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\灵岛设置.lnk'),'--settings')
+    @((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\灵岛设置.lnk'),'--settings'),
 )
 foreach($entry in $entries){
     $link=$shell.CreateShortcut($entry[0]);$link.TargetPath=$exePath;$link.Arguments=$entry[1]
     $link.WorkingDirectory=$installDir;$link.IconLocation=$exePath+',0';$link.Description='灵岛 Lingdao';$link.Save()
 }
-$key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai'
+$key='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lingdao'
 New-Item -Path $key -Force | Out-Null
 $version=(Get-Item -LiteralPath $exePath).VersionInfo.FileVersion
 $psExe=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $values=@{DisplayName='灵岛 Lingdao';DisplayVersion=$version;Publisher='灵岛';InstallLocation=$installDir;DisplayIcon=$exePath+',0';UninstallString=('"'+$psExe+'" -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $installDir 'uninstall.ps1')+'"')}
 foreach($name in $values.Keys){New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null}
 foreach($name in @('NoModify','NoRepair')){New-ItemProperty -Path $key -Name $name -Value 1 -PropertyType DWord -Force | Out-Null}
+# 改名前残留的旧启动项/卸载项，一并清掉，避免「设置→应用」里出现两个同名项。
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Daozai' -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai' -ErrorAction SilentlyContinue
 Start-Process -FilePath $exePath -WorkingDirectory $installDir -WindowStyle Hidden
 Write-Output ('灵岛 '+$version+' 已安装：'+$exePath)

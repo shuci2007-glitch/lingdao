@@ -836,7 +836,7 @@ impl App {
             }
             if ctx.input(|i|i.viewport().close_requested()){self.settings_open=false;}
             let before=format!("{:?}",self.settings);
-            egui::SidePanel::left("settings-sidebar").resizable(false).exact_width(180.0).frame(egui::Frame::new().fill(settings_color(ctx,Color32::from_rgb(29,29,32),Color32::from_rgb(237,239,243))).stroke(egui::Stroke::new(1.0,settings_color(ctx,Color32::from_rgb(42,42,45),Color32::from_rgb(216,219,225)))).inner_margin(egui::Margin::symmetric(10,12))).show(ctx,|ui|{
+            egui::SidePanel::left("settings-sidebar").resizable(false).exact_width(180.0).frame(egui::Frame::new().fill(settings_color(ctx,Color32::from_rgb(29,29,32),Color32::from_rgb(237,239,243))).stroke(egui::Stroke::new(1.0_f32,settings_color(ctx,Color32::from_rgb(42,42,45),Color32::from_rgb(216,219,225)))).inner_margin(egui::Margin::symmetric(10,12))).show(ctx,|ui|{
                 ui.add_space(5.0);
                 ui.label(egui::RichText::new("设置").size(11.0).color(settings_color(ctx,Color32::from_gray(150),Color32::from_gray(105))));
                 ui.add_space(7.0);
@@ -932,7 +932,7 @@ impl App {
                                     if payload.0!=page {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                         let y=if self.settings.page_order.iter().position(|p|*p==payload.0).unwrap()<index {row.rect.bottom()}else{row.rect.top()};
-                                        ui.painter().line_segment([egui::pos2(row.rect.left(),y),egui::pos2(row.rect.right(),y)],egui::Stroke::new(2.0,Color32::from_rgb(70,150,255)));
+                                        ui.painter().line_segment([egui::pos2(row.rect.left(),y),egui::pos2(row.rect.right(),y)],egui::Stroke::new(2.0_f32,Color32::from_rgb(70,150,255)));
                                     }
                                 }
                                 if let Some(payload)=row.dnd_release_payload::<PageDrag>() {movement=Some((payload.0,index));}
@@ -992,7 +992,7 @@ impl App {
                                         let (rect,response)=ui.allocate_exact_size(egui::vec2(19.0,19.0),egui::Sense::click());
                                         ui.painter().circle_filled(rect.center(),8.5,color);
                                         if crate::theme::accent()==color {
-                                            ui.painter().circle_stroke(rect.center(),10.0,egui::Stroke::new(1.5,settings_color(ctx,Color32::from_gray(40),Color32::WHITE)));
+                                            ui.painter().circle_stroke(rect.center(),10.0,egui::Stroke::new(1.5_f32,settings_color(ctx,Color32::from_gray(40),Color32::WHITE)));
                                         }
                                         if response.clicked(){self.settings.accent=crate::theme::hex(color);self.settings.save();ctx.request_repaint();}
                                     }
@@ -1258,6 +1258,12 @@ impl App {
                             if changed{self.mail_accounts_changed();}
                             if let Some(i)=remove{
                                 let email=self.mail.accounts[i].email.clone();
+                                // 清掉这个账号在岛内的所有缓存，避免删除后列表里还残留它的邮件/验证码/隐私记录。
+                                let had_code=self.mail.recent.iter().any(|m|m.account.eq_ignore_ascii_case(&email)&&m.code.as_deref()==self.code_seen.as_ref().map(|(c,_)|c.as_str()));
+                                self.mail.recent.retain(|m|!m.account.eq_ignore_ascii_case(&email));
+                                if self.mail.open_uid.as_ref().is_some_and(|(a,_)|a.eq_ignore_ascii_case(&email)){self.mail.open_uid=None;}
+                                if self.mail.reading.as_ref().is_some_and(|m|m.account.eq_ignore_ascii_case(&email)){self.mail.reading=None;}
+                                if had_code{self.code_seen=None;}
                                 self.mail.accounts.remove(i);
                                 crate::mail::secrets::delete(&email);
                                 self.mail.status.remove(&email.to_ascii_lowercase());

@@ -504,9 +504,11 @@ fn event_of(fields: &[(String, String)]) -> Option<Meeting> {
             let n = chrono::NaiveDateTime::parse_from_str(&value, "%Y%m%dT%H%M%S").ok()?;
             if let Some(tz) = get(&format!("{name}-TZID")) {
                 let zone: chrono_tz::Tz = tz.parse().ok()?;
-                zone.from_local_datetime(&n).single()?.with_timezone(&chrono::Local)
+                // 夏令时切换当天本地时间可能不存在（春令前进档）或重复（秋令后退档），
+                // 用 earliest() 而不是 single()，否则整条会议会被静默丢弃。
+                zone.from_local_datetime(&n).earliest()?.with_timezone(&chrono::Local)
             } else {
-                chrono::Local.from_local_datetime(&n).single()?
+                chrono::Local.from_local_datetime(&n).earliest()?
             }
         })
     };
@@ -990,17 +992,24 @@ mod service {
         }
     }
 
+    /// 单封邮件正文最多读 1 MiB。正文只用于预览/取验证码，超大邮件（带大附件或超长线程）
+    /// 没必要整封进内存，截断到预览够用的长度即可，避免极端邮件撑爆内存。
+    const MAX_MAIL_TEXT: usize = 1 << 20;
     fn raw_of(fetch: &imap::types::Fetch) -> Option<Vec<u8>> {
         let header = fetch.header()?;
         let mut raw = header.to_vec();
         if let Some(text) = fetch.text() {
+            let take = text.len().min(MAX_MAIL_TEXT);
             raw.extend_from_slice(b"\r\n");
-            raw.extend_from_slice(text);
+            raw.extend_from_slice(&text[..take]);
         }
         Some(raw)
     }
 
     fn item_of(fetch: &imap::types::Fetch, account: &Account) -> Option<Item> {
+        // 服务端没回 UID 的邮件无法可靠去重/忽略（uid=0 会和别的邮件撞车），
+        // 宁可跳过也不让它进列表污染「已忽略」与去重逻辑。
+        let uid = fetch.uid?;
         let parsed = parse_message(&raw_of(fetch)?);
         let subject = if parsed.subject.is_empty() { "（无主题）".to_string() } else { parsed.subject.clone() };
         Some(Item {
@@ -1015,7 +1024,7 @@ mod service {
             summary: body_of(&parsed),
             links: links_of(&parsed),
             meeting: meeting_of(&parsed.calendar),
-            uid: fetch.uid.unwrap_or(0),
+            uid,
         })
     }
 

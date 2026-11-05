@@ -13,7 +13,8 @@ pub(crate) struct Draft {
 impl Draft {
     pub fn new(day: NaiveDate) -> Self {
         let now=Local::now()+Duration::minutes(30);
-        let start=if day==Local::now().date_naive(){now.naive_local().with_second(0).unwrap()}
+        let today=now.date_naive();
+        let start=if day==today{now.naive_local().with_second(0).unwrap()}
             else{day.and_hms_opt(9,0,0).unwrap()};
         let end=start+Duration::hours(1);
         Self{uid:None,title:String::new(),start_date:start.format("%Y-%m-%d").to_string(),start_time:start.format("%H:%M").to_string(),

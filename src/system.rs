@@ -379,19 +379,53 @@ fn notification_text(n: &UserNotification) -> Result<(String, String, String)> {
     }
     Ok((app, id, parts.join(" · ")))
 }
+/// 带超时的 WinRT 异步结果等待：轮询 Status，超时则取消并返回 None。
+fn async_status<T: windows::core::RuntimeType + 'static>(
+    op: windows::Foundation::IAsyncOperation<T>,
+    timeout: std::time::Duration,
+) -> Option<T> {
+    use windows::Foundation::AsyncStatus;
+    let start = std::time::Instant::now();
+    loop {
+        match op.Status() {
+            Ok(AsyncStatus::Started) => {
+                if start.elapsed() >= timeout {
+                    let _ = op.Cancel();
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Ok(AsyncStatus::Completed) => return op.GetResults().ok(),
+            _ => return None,
+        }
+    }
+}
+
 /// 必须由窗口线程发起权限请求，后台线程仅等待并读取新增通知。
 pub fn connect() -> Result<Receiver<Incoming>> {
     let listener = UserNotificationListener::Current()?;
     let request = listener.RequestAccessAsync()?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let run = || -> Result<()> {
-            let _ = unsafe {
-                windows::Win32::System::WinRT::RoInitialize(
-                    windows::Win32::System::WinRT::RO_INIT_MULTITHREADED,
-                )
+        // 初始化 WinRT 多线程公寓；线程退出前必须配对 RoUninitialize。
+        let hr = unsafe {
+            windows::Win32::System::WinRT::RoInitialize(
+                windows::Win32::System::WinRT::RO_INIT_MULTITHREADED,
+            )
+        };
+        // run 内有多处提前返回，用内层闭包收集结果，外层保证反初始化一定执行。
+        let result = (|| -> Result<()> {
+            // 阻塞等待用户授权（带超时），IAsyncOperation 在本版本没有 .get()，用轮询辅助函数。
+            let access = match async_status(request, std::time::Duration::from_secs(10)) {
+                Some(a) => a,
+                None => {
+                    let _ = tx.send(Incoming::Status(
+                        "Windows 通知权限请求超时，可重试或检查系统设置。".into(),
+                    ));
+                    return Ok(());
+                }
             };
-            if request.get()? != UserNotificationListenerAccessStatus::Allowed {
+            if access != UserNotificationListenerAccessStatus::Allowed {
                 let _ = tx.send(Incoming::Status(
                     "Windows 未授予通知读取权限，可在系统设置中调整。".into(),
                 ));
@@ -400,14 +434,21 @@ pub fn connect() -> Result<Receiver<Incoming>> {
             let listener = UserNotificationListener::Current()?;
             let mut seen = HashSet::new();
             let mut first = true;
+            let mut last_count: Option<usize> = None;
             loop {
                 if listener.GetAccessStatus()? != UserNotificationListenerAccessStatus::Allowed {
                     let _ = tx.send(Incoming::Status("通知权限已被关闭".into()));
                     return Ok(());
                 }
-                let items = listener
-                    .GetNotificationsAsync(NotificationKinds::Toast)?
-                    .get()?;
+                // 带超时地等待本轮取通知，避免 WinRT 调用卡死整个监听线程。
+                let op = listener.GetNotificationsAsync(NotificationKinds::Toast)?;
+                let items = match async_status(op, std::time::Duration::from_secs(5)) {
+                    Some(items) => items,
+                    None => {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        continue;
+                    }
+                };
                 let mut current = HashSet::new();
                 for i in 0..items.Size()? {
                     let n = items.GetAt(i)?;
@@ -429,21 +470,25 @@ pub fn connect() -> Result<Receiver<Incoming>> {
                         items.Size()?
                     )));
                     first = false;
+                } else if last_count != Some(current.len()) {
+                    // 仅在可见通知数量变化时上报，避免状态栏每 2 秒刷屏。
+                    let _ = tx.send(Incoming::Status(format!(
+                        "正在监听 · 当前可见 {} 条通知",
+                        current.len()
+                    )));
                 }
+                last_count = Some(current.len());
                 seen = current;
                 std::thread::sleep(std::time::Duration::from_secs(2));
-                if tx
-                    .send(Incoming::Status(format!(
-                        "正在监听 · 当前可见 {} 条通知",
-                        seen.len()
-                    )))
-                    .is_err()
-                {
-                    return Ok(());
-                }
             }
-        };
-        if let Err(e) = run() {
+        })();
+        // 仅在初始化成功时反初始化，与 RoInitialize 配对。
+        if hr.is_ok() {
+            unsafe {
+                windows::Win32::System::WinRT::RoUninitialize();
+            }
+        }
+        if let Err(e) = result {
             let _ = tx.send(Incoming::Status(format!(
                 "Windows 暂不允许读取通知：{}。此功能可能需要打包应用身份。",
                 e.code()

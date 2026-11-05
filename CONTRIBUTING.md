@@ -7,15 +7,15 @@
 安装 Rust stable、Visual Studio C++ 构建工具和 Windows SDK，克隆仓库后运行：
 
 ```powershell
-cargo build --locked --bin daozai
+cargo build --locked --bin lingdao
 cargo test --locked --all-targets --features record -- --test-threads=1
 ```
 
 为开发实例指定独立目录，避免覆盖日常使用数据：
 
 ```powershell
-$env:DAOZAI_DATA_DIR = Join-Path $env:TEMP 'daozai-development'
-cargo run --locked --bin daozai
+$env:LINGDAO_DATA_DIR = Join-Path $env:TEMP 'lingdao-development'
+cargo run --locked --bin lingdao
 ```
 
 常规测试使用合成数据。带 `#[ignore]` 的真实账号测试或截图导出测试须按需要显式运行；不要在公共 CI 中连接私人账号。

@@ -34,7 +34,7 @@ fn color_picker(ui:&mut egui::Ui,provider:Provider,value:&mut Accent){
             let (rect,response)=ui.allocate_exact_size(egui::vec2(22.0,25.0),egui::Sense::click());
             let on=*value==accent;
             if response.on_hover_text(accent.label()).clicked(){*value=accent;}
-            if on{ui.painter().circle_stroke(rect.center(),10.0,egui::Stroke::new(1.5,Color32::WHITE));}
+            if on{ui.painter().circle_stroke(rect.center(),10.0,egui::Stroke::new(1.5_f32,Color32::WHITE));}
             ui.painter().circle_filled(rect.center(),7.0,accent_color(accent,provider));
         }
         ui.label(egui::RichText::new(value.label()).size(12.0).color(theme::GRAY));

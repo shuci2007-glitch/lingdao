@@ -415,7 +415,26 @@ fn dav_response(
                     .map_err(|_|Failure::text("日历重定向地址无效"))?;
             }
             Ok(r) if r.status()>=300=>return Err(Failure::status(cfg.provider,r.status())),
-            Ok(r)=>return r.into_string().map(|xml|(xml,target.to_string())).map_err(|e|Failure::transport(&e.to_string())),
+            Ok(r) => {
+                // 限制响应体积，避免恶意或异常服务端返回超大正文把内存撑爆。
+                const MAX_CALDAV_BYTES: usize = 16 << 20; // 16 MiB
+                use std::io::Read;
+                let mut reader = r.into_reader();
+                let mut buf = Vec::with_capacity(64 << 10);
+                let mut chunk = [0u8; 8192];
+                let mut total: usize = 0;
+                loop {
+                    let n = reader.read(&mut chunk).map_err(|e| Failure::transport(&e.to_string()))?;
+                    if n == 0 { break; }
+                    total += n;
+                    if total > MAX_CALDAV_BYTES {
+                        return Err(Failure::text("日历返回内容过大，已拒绝以防内存耗尽"));
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+                let xml = String::from_utf8_lossy(&buf).into_owned();
+                return Ok((xml, target.to_string()));
+            }
             Err(ureq::Error::Status(code,_))=>return Err(Failure::status(cfg.provider,code)),
             Err(e)=>return Err(Failure::transport(&e.to_string())),
         }
@@ -469,9 +488,17 @@ pub fn month_grid(date: NaiveDate) -> [NaiveDate; 42] {
 /// 按本地月份查询，结束时间为下月一日零点，不截成未来 24 小时。
 pub fn fetch_month(cfg: &Config, password: &str, month: NaiveDate) -> Result<Fetched, Failure> {
     let first = month_start(month);
-    let end = first.checked_add_months(chrono::Months::new(1)).unwrap();
-    let utc = |date: NaiveDate| date.and_hms_opt(0, 0, 0).unwrap().and_local_timezone(chrono::Local).earliest().unwrap().with_timezone(&chrono::Utc);
-    fetch_range(cfg, password, utc(first), utc(end))
+    let end = first.checked_add_months(chrono::Months::new(1)).ok_or_else(|| Failure::text("月份计算失败"))?;
+    // 把本地月份端点转 UTC；夏令时切换当天该本地时间可能不存在，earliest() 容错而非直接 panic。
+    let to_utc = |date: NaiveDate| -> Result<chrono::DateTime<chrono::Utc>, Failure> {
+        let naive = date.and_hms_opt(0, 0, 0).ok_or_else(|| Failure::text("日期无效"))?;
+        let local = naive
+            .and_local_timezone(chrono::Local)
+            .earliest()
+            .ok_or_else(|| Failure::text("该本地时间不存在（可能落在夏令时切换间隙）"))?;
+        Ok(local.with_timezone(&chrono::Utc))
+    };
+    fetch_range(cfg, password, to_utc(first)?, to_utc(end)?)
 }
 
 fn fetch_range(cfg: &Config, password: &str, lo: chrono::DateTime<chrono::Utc>, hi: chrono::DateTime<chrono::Utc>) -> Result<Fetched, Failure> {

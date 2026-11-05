@@ -42,10 +42,16 @@ impl Raster {
             };
             match d.pos {
                 Some([x0, y0]) => {
-                    let t = self.textures.get_mut(id).expect("partial update of unknown texture");
-                    for y in 0..h {
-                        for x in 0..w {
-                            t.px[(y0 + y) * t.w + x0 + x] = px[y * w + x];
+                    // 部分更新引用到未知纹理（可能已被 free）时跳过，而不是 panic；
+                    // 同时防御补丁尺寸超过既有纹理导致越界写入。
+                    if let Some(t) = self.textures.get_mut(id) {
+                        if t.w == 0 || t.h == 0 {
+                            continue;
+                        }
+                        for y in 0..h.min(t.h.saturating_sub(y0)) {
+                            for x in 0..w.min(t.w.saturating_sub(x0)) {
+                                t.px[(y0 + y) * t.w + x0 + x] = px[y * w + x];
+                            }
                         }
                     }
                 }
@@ -149,6 +155,10 @@ impl Raster {
 }
 
 fn sample(t: &Tex, u: f32, v: f32) -> [f32; 4] {
+    if t.w == 0 || t.h == 0 {
+        // 空纹理（0×0）：没有可采样的内容，返回透明，避免 (w-1) 下溢与越界。
+        return [0.0; 4];
+    }
     let x = (u * t.w as f32 - 0.5).clamp(0.0, (t.w - 1) as f32);
     let y = (v * t.h as f32 - 0.5).clamp(0.0, (t.h - 1) as f32);
     let (xi, yi) = (x.floor() as usize, y.floor() as usize);

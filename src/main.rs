@@ -193,7 +193,10 @@ impl Shell {
             date,
             battery: self.sys.0,
             charging: self.sys.1,
+            #[cfg(windows)]
             network: Some(self.system_state.network),
+            #[cfg(not(windows))]
+            network: None,
             cursor,
             idle_seconds: {
                 #[cfg(windows)] {Some(lingdao::system::idle_seconds())}
@@ -204,7 +207,10 @@ impl Shell {
                 #[cfg(not(windows))] {None}
             },
             media: self.media.lock().map(|m| m.clone()).unwrap_or_default(),
+            #[cfg(windows)]
             volume: self.system_state.volume,
+            #[cfg(not(windows))]
+            volume: None,
             bt: self.bt.clone(),
             bt_ready: self.bt_ready,
         }

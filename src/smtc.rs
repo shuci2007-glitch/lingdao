@@ -292,9 +292,14 @@ pub fn control(_cmd: Transport,_source:&str) {}
 #[cfg(windows)]
 fn init_winrt() {
     use windows::Win32::System::Com::CoIncrementMTAUsage;
-    unsafe {
+    use std::sync::OnceLock;
+    // 整个进程只需进入一次 MTA（control 在 UI 线程、poller 在后台线程都会用到）。
+    // 用 OnceLock 保证只自增一次，MTA 随进程退出由系统回收，
+    // 避免 control() 每次调用都自增导致 MTA 引用计数无限增长。
+    static MTA: OnceLock<()> = OnceLock::new();
+    MTA.get_or_init(|| unsafe {
         let _ = CoIncrementMTAUsage();
-    }
+    });
 }
 
 #[cfg(not(windows))]

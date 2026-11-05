@@ -1,8 +1,8 @@
 ﻿param([Parameter(Mandatory=$true)][string]$NsisCompiler)
 $ErrorActionPreference = 'Stop'
 $project = Split-Path $PSScriptRoot -Parent
-$id = 'DaozaiSetupTest' + [Guid]::NewGuid().ToString('N')
-$name = '岛仔安装测试-' + $id.Substring(15,8)
+$id = 'LingdaoSetupTest' + [Guid]::NewGuid().ToString('N')
+$name = '灵岛安装测试-' + $id.Substring(15,8)
 $root = Join-Path $project ('target\' + $id)
 $installed = Join-Path $root 'installed files'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\' + $id
@@ -31,7 +31,7 @@ function Assert-Installed {
     $entry = Get-ItemProperty -LiteralPath $key
     if ($entry.InstallLocation -ne $installed -or $entry.DisplayVersion -ne '9.8.7') { throw '安装注册信息不正确' }
     if ($entry.UninstallString -ne ('"' + (Join-Path $installed 'Uninstall.exe') + '"')) { throw '卸载命令不正确' }
-    if ((Get-FileHash (Join-Path $installed 'daozai.exe')).Hash -ne (Get-FileHash $fixture).Hash) { throw '程序复制不正确' }
+    if ((Get-FileHash (Join-Path $installed 'lingdao.exe')).Hash -ne (Get-FileHash $fixture).Hash) { throw '程序复制不正确' }
     $shell = New-Object -ComObject WScript.Shell
     $desktopLink = Join-Path $shell.SpecialFolders.Item('Desktop') "$name.lnk"
     if ((Test-Path -LiteralPath $desktopLink) -ne $Desktop) { throw '桌面快捷方式选项未生效' }
@@ -43,12 +43,12 @@ function Assert-Installed {
         $probe = Join-Path $root 'shortcut-probe.lnk'
         Copy-Item -LiteralPath $path -Destination $probe -Force
         $actual = $shell.CreateShortcut($probe).TargetPath
-        $expected = Join-Path $installed 'daozai.exe'
+        $expected = Join-Path $installed 'lingdao.exe'
         if (-not (Test-Path -LiteralPath $actual) -or (Get-Item -LiteralPath $actual).FullName -ne (Get-Item -LiteralPath $expected).FullName) { throw "快捷方式目标不正确：$actual；预期：$expected" }
     }
     $run = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).$id
     if ($AutoStart) {
-        if ($run -ne ('"' + (Join-Path $installed 'daozai.exe') + '"')) { throw '开机自启选项或路径不正确' }
+        if ($run -ne ('"' + (Join-Path $installed 'lingdao.exe') + '"')) { throw '开机自启选项或路径不正确' }
     } elseif ($run) { throw '未勾选自启却设置了开机启动' }
     if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'keep-user-data') { throw '用户数据被修改' }
 }
@@ -56,7 +56,7 @@ try {
     Run-Setup
     Assert-Installed
     Write-Output '通过：首次安装、含空格路径、快捷方式和卸载注册'
-    Set-Content -LiteralPath (Join-Path $installed 'daozai.exe') -Value 'previous-version'
+    Set-Content -LiteralPath (Join-Path $installed 'lingdao.exe') -Value 'previous-version'
     Set-Content -LiteralPath (Join-Path $installed 'uninstall.ps1') -Value 'previous-uninstaller'
     Set-ItemProperty -LiteralPath $key -Name UninstallString -Value 'powershell.exe legacy-uninstall.ps1'
     Run-Setup
@@ -85,7 +85,7 @@ try {
     # 使用原安装路径运行原生卸载器，只操作本测试的独立产品标识。
     $process = Start-Process -FilePath (Join-Path $installed 'Uninstall.exe') -ArgumentList @('/S',"_?=$installed") -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(30000) -or $process.ExitCode -ne 0) { throw '卸载失败或超时' }
-    if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath (Join-Path $installed 'daozai.exe'))) { throw '卸载残留程序或注册信息' }
+    if ((Test-Path -LiteralPath $key) -or (Test-Path -LiteralPath (Join-Path $installed 'lingdao.exe'))) { throw '卸载残留程序或注册信息' }
     if ((Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).$id) { throw '卸载残留自启项' }
     if (-not (Test-Path -LiteralPath (Join-Path $installed 'user-file.txt'))) { throw '卸载误删额外文件' }
     if ((Get-Content -LiteralPath $sentinel -Raw).Trim() -ne 'keep-user-data') { throw '卸载误删用户数据' }

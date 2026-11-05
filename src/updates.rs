@@ -22,6 +22,8 @@ pub(crate) struct State {
     dialog_open: bool,
     focus_requested: bool,
     logo: Option<egui::TextureHandle>,
+    /// 当前下载/安装使用的临时缓存目录；安装失败时由这里兜底清理。
+    work: Option<PathBuf>,
 }
 
 impl Drop for State {
@@ -46,12 +48,19 @@ impl State {
                     self.result = Some(result); self.rx = None;
                 }
                 Event::Progress(value) => self.progress = value,
-                Event::Failed(message) => { self.message = message; self.rx = None; self.cancel = None; }
+                Event::Failed(message) => {
+                    // 安装脚本在失败后不会清理缓存目录（要保留 error.txt 给这里读取），
+                    // 这里读取完错误后由 Rust 兜底删掉，避免缓存目录无限堆积。
+                    if let Some(work) = self.work.take() { let _ = std::fs::remove_dir_all(work); }
+                    self.message = message; self.rx = None; self.cancel = None;
+                }
                 Event::Ready(work) => {
+                    self.work = Some(work.clone());
                     if self.cancel.as_ref().is_some_and(|cancel| cancel.load(Ordering::Relaxed)) {
                         self.rx = None; self.cancel = None;
                         self.message = "下载已取消".into();
                         let _ = std::fs::remove_dir_all(work);
+                        self.work = None;
                         continue;
                     }
                     let (tx, rx) = mpsc::channel(); self.rx = Some(rx); self.cancel = None;
@@ -63,6 +72,9 @@ impl State {
                     });
                 }
                 Event::Installed => {
+                    // 安装成功：update.ps1 自己会在替换完成后清理 workRoot，
+                    // 这里不抢删，避免删掉脚本替换阶段需要的 previous.exe 回滚备份。
+                    self.work = None;
                     self.rx = None;
                     ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
                 }
@@ -124,13 +136,13 @@ impl State {
                     #[cfg(windows)]
                     clip_update_window(window, ctx.pixels_per_point());
                     ui.painter().rect_filled(window, 22.0, egui::Color32::from_rgb(25,25,28));
-                    ui.painter().rect_stroke(window, 22.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(55,55,61)), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(window, 22.0, egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(55,55,61)), egui::StrokeKind::Inside);
                     let close_rect = egui::Rect::from_min_size(window.right_top()+egui::vec2(-42.0,12.0),egui::vec2(28.0,28.0));
                     let close = ui.interact(close_rect, ui.id().with("update-close"), egui::Sense::click()).on_hover_text("关闭");
                     if close.hovered() { ui.painter().rect_filled(close_rect, 8.0, theme::BTN_HOVER); }
                     let center = close_rect.center();
                     for direction in [-1.0,1.0] {
-                        ui.painter().line_segment([center+egui::vec2(-4.0,-4.0*direction),center+egui::vec2(4.0,4.0*direction)],egui::Stroke::new(1.5,theme::GRAY));
+                        ui.painter().line_segment([center+egui::vec2(-4.0,-4.0*direction),center+egui::vec2(4.0,4.0*direction)],egui::Stroke::new(1.5_f32,theme::GRAY));
                     }
                     if close.clicked() && !installing { self.dismiss(); }
                     let drag_rect = egui::Rect::from_min_max(window.min,egui::pos2(close_rect.left()-8.0,window.top()+42.0));

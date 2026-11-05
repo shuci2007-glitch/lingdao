@@ -218,9 +218,10 @@ Section "安装"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   Delete "$INSTDIR\uninstall.ps1"
-  ; v0.6.52 改名前叫 Daozai：只清掉旧启动项和同名目录里的旧 exe，
-  ; 旧安装目录（Programs\Daozai）和它的卸载项保留，方便你在「设置 → 应用」里正常卸载。
+  ; v0.6.52 改名前叫 Daozai：清掉旧启动项、旧卸载项和同名目录里的旧 exe，
+  ; 避免「设置 → 应用」里出现两个同名项。
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Daozai"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai"
   Delete "$INSTDIR\daozai.exe"
 SectionEnd
 
@@ -248,6 +249,7 @@ Section "Uninstall"
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${APP_ID}"
   ${EndIf}
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Daozai"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Daozai"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
   ; 只移除空的安装目录，用户数据和用户自行放入的文件都保留。
   RMDir "$INSTDIR"

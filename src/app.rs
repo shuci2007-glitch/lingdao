@@ -215,6 +215,9 @@ pub(crate) struct MailState {
     pub reader_focus: bool,
     /// 已经提醒过的会议，键是 `UID + DTSTART`（邮件和日历两条来源共用）。
     pub fired: std::collections::HashSet<String>,
+    /// 用户在本机已忽略（删除）的邮件 uid，按账号小写聚合。
+    /// 仅本地生效、不删服务器邮件；落盘后即使重启也不会再从服务器拉回。
+    pub dismissed: std::collections::HashMap<String, std::collections::HashSet<u32>>,
 }
 
 #[derive(Default)]
@@ -232,7 +235,10 @@ impl MailState {
     /// 最近一封带验证码的邮件。
     pub fn code_item(&self) -> Option<&mail::Item> {self.recent.iter().find(|m|m.code.is_some())}
     /// 从岛内列表删掉一封邮件：只动本地列表，不删服务器上的邮件。
+    /// 同时记入 `dismissed`，下次启动从服务器拉回时也会被跳过，不会「删除后复活」。
     pub fn dismiss(&mut self, account: &str, uid: u32) {
+        let key = account.to_ascii_lowercase();
+        self.dismissed.entry(key).or_default().insert(uid);
         self.recent.retain(|m| m.uid != uid || !m.account.eq_ignore_ascii_case(account));
         if self.open_uid.as_ref().is_some_and(|(a, u)| *u == uid && a.eq_ignore_ascii_case(account)) {
             self.open_uid = None;
@@ -501,6 +507,9 @@ pub struct App {
     idle_preview_until: f64,
     /// 「圆点」形态：收成小黑丸后被屏顶吸进去的进度（0=完整圆点，1=完全融入）。
     idle_drop: f32,
+    /// 圆点融入后「回落」状态位：光标贴顶时置位，让圆点重新出现供交互；
+    /// 离开屏顶才清除。用独立状态位避免在 idle_drop≈1 与 <1 之间来回振荡。
+    idle_drop_recede: bool,
     /// 已播报过的活动签名，用来只在「新活动出现」时响一声。
     sound_sig: Vec<String>,
     sound_at: f64,
@@ -599,7 +608,7 @@ impl App {
             volume_a: 0.0,
             bt_shown: Vec::new(),
             bt_initialized: false,
-            mail: MailState { accounts: mail::load_accounts(), ..Default::default() },
+            mail: MailState { accounts: mail::load_accounts(), dismissed: crate::model::load_dismissed(), ..Default::default() },
             calendar: CalendarState::load(),
             quota: crate::quota_ui::State::load(),
             updates: Default::default(),
@@ -616,6 +625,7 @@ impl App {
             near_top_now: false,
             idle_preview_until: 0.0,
             idle_drop: 0.0,
+            idle_drop_recede: false,
             dnd_cache: false,
             dnd_checked_at: 0.0,
             sound_sig: Vec::new(),
@@ -644,6 +654,10 @@ impl App {
             }
             mail::Event::Mail { item, new } => {
                 if !watching(&item.account){return;}
+                // 用户已忽略过这封邮件：即使重启后服务器又把它放进最近列表，也不再显示。
+                if self.mail.dismissed.get(&item.account.to_ascii_lowercase()).is_some_and(|s| s.contains(&item.uid)) {
+                    return;
+                }
                 self.mail
                     .recent
                     .retain(|m| !(m.account.eq_ignore_ascii_case(&item.account) && m.uid == item.uid));
@@ -1200,12 +1214,17 @@ impl App {
     fn previewing(&self)->bool { self.t < self.idle_preview_until }
     /// 是否应收成小药丸。
     fn idle_pill(&self)->bool {
-        if self.previewing() { return matches!(self.selected_raw(), Present::Pill); }
+        // 预览期内若已有展开面板/通知/编辑态，先让它们正常显示，不要被强制裁空。
+        if self.previewing() && !self.open && self.notice.is_none() && !self.is_editing() {
+            return matches!(self.selected_raw(), Present::Pill);
+        }
         self.idle() && matches!(self.selected_present(), Present::Pill)
     }
     /// 是否应完全隐入（窗口裁剪为空）。
     fn idle_hidden(&self)->bool {
-        if self.previewing() { return matches!(self.selected_raw(), Present::Hidden); }
+        if self.previewing() && !self.open && self.notice.is_none() && !self.is_editing() {
+            return matches!(self.selected_raw(), Present::Hidden);
+        }
         self.idle() && matches!(self.selected_present(), Present::Hidden)
     }
     /// 是否强制细线：浏览器避让；或手动「极简刘海」且空闲形态为「黑条」。
@@ -1223,6 +1242,7 @@ impl App {
         self.idle_preview_until = self.t + 5.0;
         // 每次在设置里点选都从头播一遍：收成圆点 → 被屏顶吸进去，方便反复确认效果。
         self.idle_drop = 0.0;
+        self.idle_drop_recede = false;
         // 手动「极简刘海」会覆盖「黑条」，切换时顺手关掉，避免用户以为设置没生效。
         self.settings.minimal = false;
     }
@@ -1311,8 +1331,9 @@ impl App {
         } else if t > down {
             smoothstep(down, down + 1.0, t)
         } else {
-            // 0..up：从 1 渐退到 0（0:00 最暗）
-            smoothstep(up - 1.0, up, t)
+            // 0..up：0:00 最暗(1)，07:30 渐亮到 0（与「22:30 后渐暗」对称）。
+            let v = smoothstep(up - 1.0, up, t);
+            1.0 - v
         }
     }
 
@@ -1665,19 +1686,26 @@ impl App {
             || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
         // 「圆点」融入顶部：岛先收束成一颗正圆小黑丸（宽度收到圆点量级即算落定），
-        // 随后 idle_drop 0→1 把它向上吸进屏顶。开始之后一定播完，
-        // 只有完全融入（=1）且光标贴近屏顶时才回落，让圆点重新出现供交互。
+        // 随后 idle_drop 0→1 把它向上吸进屏顶。只有「圆点」形态才走这套吸入逻辑；
+        // 完全隐入(Hidden)贴顶冒头时不应被吸走，否则会冒出一颗闪烁的圆点（而非小药丸）。
         let collapsed = self.w.pos < IDLE_DROP_W + 12.0 && self.h.pos < IDLE_DROP_H + 14.0;
-        let merged = self.idle_drop >= 0.995;
-        let drop_target = if !self.idle_pill() || !collapsed {
+        let drop_pill = self.settings.idle_mode == model::IdleMode::Drop && self.idle_pill();
+        // 光标贴顶时让圆点回落（保持可见）供交互；离开屏顶再被吸进去。
+        // 用独立状态位锁住回落过程，避免完全融入（idle_drop≈1）后立刻又吸回去来回振荡。
+        if drop_pill && self.near_top_now {
+            self.idle_drop_recede = true;
+        }
+        if !self.near_top_now {
+            self.idle_drop_recede = false;
+        }
+        let drop_target = if !drop_pill || !collapsed {
             0.0
-        } else if merged && self.near_top_now {
+        } else if self.idle_drop_recede {
             0.0
         } else {
             1.0
         };
-        // 线性推进：收束完成后先让圆点完整挂住约 0.35s，再用约 0.8s 被顶部吸走。
-        // 到 1 之后要稳住，别因 target==pos 掉进回落分支来回振荡。
+        // 线性推进：非回落时约 0.8s 被顶部吸走；回落时约 0.8s 沉回可见圆点。
         if drop_target >= 1.0 {
             self.idle_drop = (self.idle_drop + dt / 1.15).min(1.0);
         } else {
@@ -1914,7 +1942,8 @@ impl App {
             region: if idle_hidden { zero() } else { rel(floating_toast.map_or(region,|toast|region.union(toast)).intersect(ui.max_rect())) },
             hit: if idle_hidden { zero() } else { rel(self.hit_rect(cx, top, self.progress())) },
             notice_hit: if idle_hidden { None } else { notice_shape.map(|r|rel(notice_details.map_or(r,|details|r.union(details)))) },
-            file_drop_zone: if idle_hidden { None } else { self.settings.visible_pages[3].then(||rel(Rect::from_min_size(Pos2::new(cx-PW/2.0,top),Vec2::new(PW,96.0)))) },
+            // 圆点被屏顶吸走（不可见）时不给拖放区，避免经过屏顶中央被静默切到置物架页。
+            file_drop_zone: if idle_hidden || (self.idle_pill() && self.idle_drop > 0.5) { None } else { self.settings.visible_pages[3].then(||rel(Rect::from_min_size(Pos2::new(cx-PW/2.0,top),Vec2::new(PW,96.0)))) },
             expanded: self.open,
             editing: self.is_editing(),
             animating,
@@ -1928,7 +1957,10 @@ impl App {
             let (width,height)=self.base_size();
             // 小药丸给足够大的命中区，方便点击展开；细线仍保持原有很薄的命中区，
             // 避免挡住浏览器标签栏（这是之前修过的回归点）。
-            let (min_w,min_h)=if self.idle_pill(){(120.0,26.0)}else{(0.0,0.0)};
+            // 圆点被屏顶吸走（idle_drop 很高）时整颗不可见，不保留命中区，否则会拦截
+            // 鼠标、误触展开或在屏顶中央空点；回落(可见)时才给 120×26 便于点击。
+            let absorbed = self.idle_pill() && self.idle_drop > 0.5;
+            let (min_w,min_h)=if self.idle_pill()&&!absorbed{(120.0,26.0)}else{(0.0,0.0)};
             let width=self.w.pos.min(width).max(min_w);
             let height=self.h.pos.min(height).max(min_h);
             Rect::from_min_size(Pos2::new(cx-width/2.0,top),Vec2::new(width,height))

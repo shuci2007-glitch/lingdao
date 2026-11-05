@@ -810,6 +810,7 @@ impl App {
         });
         if let Some((account,uid))=dismiss {
             self.mail.dismiss(&account,uid);
+            crate::model::save_dismissed(&self.mail.dismissed);
             // 被删的正好是岛上显示的验证码时一起撤掉，避免显示已删邮件的内容。
             if self.code_seen.as_ref().is_some_and(|_| self.mail.code_item().is_none()) { self.code_seen=None; }
         }
@@ -898,6 +899,7 @@ impl App {
         if del.clicked() {
             let (account, uid) = (item.account.clone(), item.uid);
             self.mail.dismiss(&account, uid);
+            crate::model::save_dismissed(&self.mail.dismissed);
             if self.code_seen.as_ref().is_some_and(|_| self.mail.code_item().is_none()) { self.code_seen = None; }
         }
     }

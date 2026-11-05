@@ -6,7 +6,7 @@ $testRoot = Join-Path $project ('target\update-test-' + [Guid]::NewGuid().ToStri
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $oldLocal = $env:LOCALAPPDATA
 try {
-    $env:LOCALAPPDATA = if ($EncryptedCache) { Join-Path $oldLocal ('DaozaiUpdateTest-' + [Guid]::NewGuid().ToString('N')) } else { Join-Path $testRoot 'local' }
+    $env:LOCALAPPDATA = if ($EncryptedCache) { Join-Path $oldLocal ('LingdaoUpdateTest-' + [Guid]::NewGuid().ToString('N')) } else { Join-Path $testRoot 'local' }
     New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
     if ($EncryptedCache -and -not ((Get-Item -LiteralPath $env:LOCALAPPDATA).Attributes -band [IO.FileAttributes]::Encrypted)) { throw '测试缓存目录必须启用 EFS 加密' }
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -19,7 +19,7 @@ try {
     [IO.File]::WriteAllText($installer, [IO.File]::ReadAllText((Join-Path $project 'installer\update.ps1')), [Text.UTF8Encoding]::new($true))
     $targetDir = Join-Path $testRoot 'installed'
     New-Item -ItemType Directory -Path $targetDir | Out-Null
-    $target = Join-Path $targetDir 'daozai.exe'
+    $target = Join-Path $targetDir 'lingdao.exe'
     $data = Join-Path $targetDir 'settings.json'
     Set-Content -LiteralPath $data -Value 'keep-user-data'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -27,12 +27,12 @@ try {
         Remove-Item -LiteralPath (Join-Path $targetDir 'started.txt') -ErrorAction SilentlyContinue
         Set-Content -LiteralPath $target -Value 'previous-program'
         $before = (Get-FileHash -LiteralPath $target).Hash
-        $work = Join-Path $env:LOCALAPPDATA ('Daozai\Updates\' + $case)
+        $work = Join-Path $env:LOCALAPPDATA ('Lingdao\Updates\' + $case)
         New-Item -ItemType Directory -Path $work -Force | Out-Null
         $archive = Join-Path $work 'update.zip'
         $zip = [IO.Compression.ZipFile]::Open($archive, [IO.Compression.ZipArchiveMode]::Create)
         $version = if ($case -eq 'wrong-version') {'9.8.8'} else {'9.8.7'}
-        $entry = if ($case -eq 'traversal') {'../daozai.exe'} else {"Daozai-v$version-windows-x64/daozai.exe"}
+        $entry = if ($case -eq 'traversal') {'../lingdao.exe'} else {"Lingdao-v$version-windows-x64/lingdao.exe"}
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $fixture, $entry) | Out-Null
         $zip.Dispose()
         Set-Content -LiteralPath (Join-Path $work 'version.txt') -Value $version
