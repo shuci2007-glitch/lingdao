@@ -1735,7 +1735,8 @@ impl App {
             self.idle_drop = anim::approach(self.idle_drop, 0.0, 6.0, dt);
         }
         // 圆点被吸进屏顶、与「水面」接触的瞬间，触发一次性水花（涟漪 + 反弹小水滴）。
-        const SPLASH_AT: f32 = 0.66;
+        // 0.36 ≈ 圆点刚好贴上水面：涟漪要在「开始被吞」时就荡开，晚了水滴已经没了。
+        const SPLASH_AT: f32 = 0.36;
         const SPLASH_RESET: f32 = 0.25;
         if !self.idle_splashed && self.idle_drop >= SPLASH_AT && drop_target >= 1.0 {
             self.idle_splash = 1.0;
@@ -1932,7 +1933,15 @@ impl App {
             Rect::from_center_size(Pos2::new(cx, top + height/2.0), Vec2::new(PW + FLARE * 2.0 + 56.0, height))
         } else {
             let (bw, bh) = self.base_size();
-            Rect::from_center_size(Pos2::new(cx, top + (bh * SWELL.1 + 12.0) / 2.0), Vec2::new(bw * SWELL.0 + 24.0, bh * SWELL.1 + 12.0))
+            // 圆点融入时要露出涟漪（横向要扩到 6r 外）和水面：裁剪区窄了涟漪直接被切掉，
+            // 只剩圆点自己在动，看着就不像「落进水里」。命中区另算，不受这里影响。
+            if self.idle_pill() && (self.idle_drop > 0.001 || self.idle_splash > 0.001) {
+                let wide = (bw * SWELL.0 + 24.0).max(124.0);
+                let tall = (bh * SWELL.1 + 12.0).max(30.0);
+                Rect::from_min_size(Pos2::new(cx - wide / 2.0, top), Vec2::new(wide, tall))
+            } else {
+                Rect::from_center_size(Pos2::new(cx, top + (bh * SWELL.1 + 12.0) / 2.0), Vec2::new(bw * SWELL.0 + 24.0, bh * SWELL.1 + 12.0))
+            }
         };
         if !idle_hidden {
             if let Some(rect)=notice_rect {region=region.union(rect.expand2(Vec2::new(12.0,8.0)));}
@@ -2024,21 +2033,48 @@ impl App {
     }
 
     /// 画一颗贴在屏顶的正圆小黑丸——iPhone 灵动岛收束后的样子。
-    /// `de` 是吸入进度：0 = 完整圆点，1 = 已被屏顶吞掉；中途整体加速上移并淡出。
-    /// 圆点形态的水滴：被屏顶吸进去时，像水滴落入水面——主体边收边淡出，
-    /// 接触瞬间在「水面」(屏顶) 溅起压扁的涟漪波纹，上部再分离一颗小水滴逐渐融入顶部。
+    /// `de` 是吸入进度：0 = 完整圆点，1 = 已被屏顶吞掉。
+    /// 融入的表现方式：**不靠淡出**，而是把「水面以上的部分裁掉」。
+    /// 屏顶上沿就是水面，水滴往上走时上部先没入水面、下部留下来继续收，
+    /// 这样才像真的水滴被水面吞掉，而不是整颗一边上移一边变透明。
+    /// 水滴被「水面」（屏顶）吞掉时的几何。
+    /// 返回 `(rx, ry, 圆心相对水面的 y, 底部相对水面的距离, 透明度)`。
+    /// 关键性质：底部距离随 `de` 单调减小到 0，而顶边始终贴在水面上——
+    /// 也就是「上部先没入水面，下部逐渐跟着收进去」。
+    pub(crate) fn drop_shape(de: f32, w: f32, h: f32) -> (f32, f32, f32, f32, f32) {
+        // 接触水面后先被拉长、变细，再整颗被吞进去——表面张力拉着水滴的样子。
+        let stretch = 1.0 + 0.26 * smoothstep(0.0, 0.45, de);
+        let squeeze = (1.0 - 0.10 * smoothstep(0.0, 0.55, de)) * (1.0 - 0.45 * smoothstep(0.74, 1.0, de));
+        let visible = h * (1.0 - smoothstep(0.06, 1.0, de));
+        let ry = (h / 2.0) * stretch;
+        let rx = (w / 2.0) * squeeze;
+        (rx, ry, visible - ry, visible, (1.0 - smoothstep(0.92, 1.0, de)).clamp(0.0, 1.0))
+    }
+
     fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32) {
         let r = (w.min(h) / 2.0).max(1.0);
-        // 主体：边被吸进屏顶边淡出。
-        let main_alpha = (1.0 - smoothstep(0.56, 0.97, de)).clamp(0.0, 1.0);
-        if main_alpha > 0.004 {
-            let sink = de * (h + 6.0);
-            let cy = top - sink + h / 2.0;
-            painter.circle_filled(
-                Pos2::new(cx, cy),
-                r,
-                Color32::from_black_alpha((main_alpha * 255.0) as u8),
+        // 水面就是窗口上沿（屏顶）。
+        let surface = top;
+        let (rx, ry, cy_rel, visible, alpha) = Self::drop_shape(de, w, h);
+        let cy = surface + cy_rel;
+        if alpha > 0.004 && visible > 0.05 {
+            // 只画水面以下：被裁掉的那一截就是「先融进顶部的上半部分」。
+            let clip = Rect::from_min_max(
+                Pos2::new(cx - rx - 2.0, surface),
+                Pos2::new(cx + rx + 2.0, surface + h + 4.0),
             );
+            let p = painter.with_clip_rect(clip);
+            let fill = Color32::from_black_alpha((alpha * 255.0) as u8);
+            p.add(egui::epaint::EllipseShape::filled(Pos2::new(cx, cy), Vec2::new(rx, ry), fill));
+            // 水面分界：接触处一条极细的亮线，让「水」和「空气」有一条边界。
+            let k = (1.0 - smoothstep(0.50, 0.86, de)).clamp(0.0, 1.0);
+            if k > 0.02 {
+                let a = (k * 0.55 * alpha * 255.0) as u8;
+                p.line_segment(
+                    [Pos2::new(cx - rx, surface + 0.5), Pos2::new(cx + rx, surface + 0.5)],
+                    egui::Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(150, 220, 255, a)),
+                );
+            }
         }
         // 水花：涟漪 + 反弹小水滴。
         if splash > 0.001 {
@@ -2065,14 +2101,12 @@ impl App {
                     egui::Stroke::new(1.5_f32, ripple_color(a)),
                 ));
             }
-            // 上部小水滴：从圆点上半部分离，向上抬升并缩小，逐渐融入顶部。
-            // 窗口只有圆点那么高（top 就是屏幕顶），越过 top 就被裁掉，
-            // 所以不能走正弦大弧线——那会整颗飞到屏幕外，什么都看不见。
-            // 这里让它在可见区里从圆点上方升起、穿过水面、缩小消失。
-            let rise = smoothstep(0.06, 0.92, local);
-            let y = top + h * 0.44 - h * 1.02 * rise;
-            let rs = (r * 0.40 * (1.0 - smoothstep(0.34, 1.0, local))).max(0.0);
-            let a = (1.0 - smoothstep(0.62, 0.98, local)).clamp(0.0, 1.0);
+            // 反弹小水滴：主体被吞掉大半之后，水面才甩出一颗更小的水珠，
+            // 像水滴入水时溅起的「卫星水滴」——出现得太早会像水滴自己裂成两半。
+            let rise = smoothstep(0.40, 1.0, local);
+            let y = top + h * 0.30 - h * 0.78 * rise;
+            let rs = (r * 0.30 * (1.0 - smoothstep(0.55, 1.0, local))).max(0.0);
+            let a = (1.0 - smoothstep(0.70, 0.99, local)).clamp(0.0, 1.0);
             if a > 0.004 && rs > 0.3 {
                 painter.circle_filled(
                     Pos2::new(cx, y),

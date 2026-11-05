@@ -3623,6 +3623,29 @@ fn idle_drop_collapses_into_a_droplet_and_merges_into_the_top_edge() {
     assert!(h.app.drop_progress() < 0.2, "贴顶后应回落，实际 {}", h.app.drop_progress());
 }
 
+/// 圆点融入时必须是「上部先没入水面、下部逐渐收进去」：
+/// 可见高度单调递减到 0，而不是整颗一边上移一边整体淡出。
+#[test]
+fn drop_absorption_eats_the_top_first() {
+    let (w, h) = (18.0_f32, 18.0_f32);
+    let (_, _, _, visible, alpha) = crate::app::App::drop_shape(0.0, w, h);
+    assert!((visible - h).abs() < 0.01, "起手应是完整一颗水滴，实际 {visible}");
+    assert!(alpha > 0.99, "刚开始不该淡出，实际 {alpha}");
+    let mut last = visible;
+    for i in 1..=100 {
+        let de = i as f32 / 100.0;
+        let (_, _, _, v, _) = crate::app::App::drop_shape(de, w, h);
+        assert!(v <= last + 1e-4, "可见高度不能反弹：de={de} v={v} 上一帧={last}");
+        last = v;
+    }
+    assert!(last < 1.0, "完全融入后不应还留着水滴，实际 {last}");
+    let (_, _, _, half, _) = crate::app::App::drop_shape(0.5, w, h);
+    assert!(half < h * 0.75 && half > 1.0, "半程应只剩一截水滴，实际 {half}");
+    // 收尾才淡出，中途保持不透明（否则看起来还是整颗在变透明）。
+    let (_, _, _, _, mid_alpha) = crate::app::App::drop_shape(0.6, w, h);
+    assert!(mid_alpha > 0.99, "六成进度仍应不透明，实际 {mid_alpha}");
+}
+
 /// 圆点融入屏顶的瞬间应溅起「涟漪 + 反弹小水滴」水花，且完全融入后自然散尽、不反复重溅。
 #[test]
 fn idle_drop_splash_ripples_on_merge() {
