@@ -262,6 +262,8 @@ pub struct Settings {
     /// 全局快捷键（"off" 表示不绑定）。
     pub hotkey_hide: String,
     pub hotkey_minimal: String,
+    /// 轮换空闲形态：黑条 → 圆点 → 完全隐入 → 黑条。
+    pub hotkey_idle: String,
     /// 灵动岛：深夜自动变暗（22:30–07:30），不刺眼。
     pub night_mode: bool,
     /// 灵动岛：检测到会议 / 投屏软件时自动勿扰（不自动弹出，只留小圆）。
@@ -276,18 +278,20 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, display_id: String::new(), avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, resident_order: Vec::new(), system_hud: true, read_notifications:false, notifications: true, notification_preview: false, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: true, mail_code_hide_seconds: 60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, accent: String::new(), ui_zoom: 1.0, media_deep: true, sit_remind: true, sit_minutes: 50, clip_clear_secs: 30, auto_hide: false, auto_hide_slim: 4.5, hotkey_hide: "off".into(), hotkey_minimal: "off".into(), night_mode: true, dnd_meeting: true, peek_enabled: true, idle_mode: IdleMode::Bar, leave_delay: 3.0 }
+        Self { settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, display_id: String::new(), avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, resident_order: Vec::new(), system_hud: true, read_notifications:false, notifications: true, notification_preview: false, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: true, mail_code_hide_seconds: 60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, accent: String::new(), ui_zoom: 1.0, media_deep: true, sit_remind: true, sit_minutes: 50, clip_clear_secs: 30, auto_hide: false, auto_hide_slim: 4.5, hotkey_hide: "off".into(), hotkey_minimal: "off".into(), hotkey_idle: "ctrl_alt_i".into(), night_mode: true, dnd_meeting: true, peek_enabled: true, idle_mode: IdleMode::Bar, leave_delay: 3.0 }
     }
 }
 
 /// 可选全局快捷键。只允许白名单，配置文件被改坏时回落到「不绑定」。
-pub fn hotkey_keys() -> [(&'static str, &'static str); 5] {
+pub fn hotkey_keys() -> [(&'static str, &'static str); 7] {
     [
         ("off", "不绑定"),
         ("ctrl_alt_d", "Ctrl + Alt + D"),
         ("ctrl_alt_m", "Ctrl + Alt + M"),
         ("ctrl_alt_space", "Ctrl + Alt + 空格"),
         ("alt_shift_d", "Alt + Shift + D"),
+        ("ctrl_alt_i", "Ctrl + Alt + I"),
+        ("alt_shift_i", "Alt + Shift + I"),
     ]
 }
 
@@ -363,6 +367,7 @@ impl Settings {
                 "auto_hide_slim" => s.auto_hide_slim = v.parse::<f32>().unwrap_or(4.5).clamp(2.0, 20.0),
                 "hotkey_hide" => s.hotkey_hide = hotkey(&v),
                 "hotkey_minimal" => s.hotkey_minimal = hotkey(&v),
+                "hotkey_idle" => s.hotkey_idle = hotkey(&v),
                 "night_mode" => s.night_mode = v == "1" || v.eq_ignore_ascii_case("true"),
                 "dnd_meeting" => s.dnd_meeting = v == "1" || v.eq_ignore_ascii_case("true"),
                 "peek_enabled" => s.peek_enabled = v == "1" || v.eq_ignore_ascii_case("true"),
@@ -426,6 +431,7 @@ impl Settings {
                 ("auto_hide_slim".into(), format!("{:.1}", self.auto_hide_slim)),
                 ("hotkey_hide".into(), self.hotkey_hide.clone()),
                 ("hotkey_minimal".into(), self.hotkey_minimal.clone()),
+                ("hotkey_idle".into(), self.hotkey_idle.clone()),
                 ("night_mode".into(), if self.night_mode { "1" } else { "0" }.into()),
                 ("dnd_meeting".into(), if self.dnd_meeting { "1" } else { "0" }.into()),
                 ("peek_enabled".into(), if self.peek_enabled { "1" } else { "0" }.into()),

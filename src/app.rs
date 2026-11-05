@@ -1254,8 +1254,20 @@ impl App {
         // 手动「极简刘海」会覆盖「黑条」，切换时顺手关掉，避免用户以为设置没生效。
         self.settings.minimal = false;
     }
-    fn effective_minimal(&self)->bool { self.thin_forced() || self.idle_pill() }
-    pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal()}
+    /// 快捷键轮换空闲形态：黑条 → 圆点 → 完全隐入 → 黑条，并立刻落盘。
+    /// 返回切换后的形态名，供调用方提示。
+    pub fn cycle_idle_mode(&mut self) -> &'static str {
+        self.settings.idle_mode = match self.settings.idle_mode {
+            model::IdleMode::Bar => model::IdleMode::Drop,
+            model::IdleMode::Drop => model::IdleMode::Hidden,
+            model::IdleMode::Hidden => model::IdleMode::Bar,
+        };
+        // 和设置页点选一致：马上从头预览一遍，方便看清当前形态。
+        self.preview_idle_mode();
+        self.settings.save();
+        self.settings.idle_mode.label()
+    }
+    fn effective_minimal(&self)->bool { self.thin_forced() || self.idle_pill() }    pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal()}
     pub(crate) fn pet_space(&self)->f32 {if self.pet_enabled(){44.0}else{0.0}}
     fn lyric_focus_space(&self)->f32 {if self.pomo.running{crate::focus_bar::LYRIC_WIDTH+10.0}else{0.0}}
     fn lyric_bar_width(&self)->f32 {LYRIC_BAR_W+if self.pet_enabled(){48.0}else{0.0}+self.lyric_focus_space()}

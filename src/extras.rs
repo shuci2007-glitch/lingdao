@@ -711,6 +711,8 @@ pub(crate) fn setting_idle_row(ui:&mut egui::Ui, value:&mut crate::model::IdleMo
         ui.label(egui::RichText::new("空闲时显示").size(13.0).color(settings_color(&ctx,Color32::WHITE,Color32::from_rgb(30,34,41))));
         ui.label(egui::RichText::new("没有活动时灵岛的样子；「圆点」会收成一颗贴屏顶的小黑丸，再向上被屏顶吸进去。鼠标贴近屏顶会临时冒头，方便随时唤起")
             .size(11.5).color(settings_color(&ctx,Color32::from_gray(195),Color32::from_gray(60))));
+        ui.label(egui::RichText::new("下方「快捷键」里可以绑一个组合，按一次就在三种形态之间轮换。")
+            .size(11.5).color(settings_color(&ctx,Color32::from_gray(195),Color32::from_gray(60))));
         ui.add_space(4.0);
         egui::Frame::new()
             .fill(settings_color(&ctx,Color32::from_rgb(33,33,36),Color32::from_rgb(232,235,240)))
@@ -1074,9 +1076,12 @@ impl App {
                         });
                         settings_label(ui,"快捷键");
                         settings_card(ui,|ui|{
-                            for which in 0..2 {
-                                let (title,current)=if which==0{("快捷键 · 隐藏/显示",&self.settings.hotkey_hide)}else{("快捷键 · 极简模式",&self.settings.hotkey_minimal)};
-                                let label=crate::model::hotkey_keys().into_iter().find(|(key,_)|key==current).map(|(_,label)|label).unwrap_or("不绑定");
+                            // 先克隆一份：同一个组合只能绑一个动作，下拉里要把已被占用的项置灰。
+                            let mut next=[self.settings.hotkey_hide.clone(),self.settings.hotkey_minimal.clone(),self.settings.hotkey_idle.clone()];
+                            for which in 0..3 {
+                                let title=match which{0=>"快捷键 · 隐藏/显示",1=>"快捷键 · 极简模式",_=>"快捷键 · 空闲形态"};
+                                let current=next[which].clone();
+                                let label=crate::model::hotkey_keys().into_iter().find(|(key,_)|*key==current).map(|(_,label)|label).unwrap_or("不绑定");
                                 let mut chosen=current.clone();
                                 ui.horizontal(|ui|{
                                     ui.label(egui::RichText::new(title).size(13.0));
@@ -1084,18 +1089,26 @@ impl App {
                                         egui::ComboBox::from_id_salt(("hotkey",which)).width(132.0).selected_text(label)
                                             .show_ui(ui,|ui|{
                                                 for (key,text) in crate::model::hotkey_keys() {
-                                                    ui.selectable_value(&mut chosen,key.to_string(),text);
+                                                    // 已被其他动作占用的组合不能选，免得一次按键触发两个动作。
+                                                    let taken=next.iter().enumerate().any(|(other,value)|other!=which&&value==key);
+                                                    ui.add_enabled_ui(!taken,|ui|{
+                                                        ui.selectable_value(&mut chosen,key.to_string(),if taken{format!("{text}（已占用）")}else{text.to_string()});
+                                                    });
                                                 }
                                             });
                                     });
                                 });
-                                if chosen!=*current {
-                                    if which==0{self.settings.hotkey_hide=chosen;}else{self.settings.hotkey_minimal=chosen;}
-                                    self.settings.save();
-                                }
+                                next[which]=chosen;
                             }
+                            let mut changed=false;
+                            if next[0]!=self.settings.hotkey_hide {self.settings.hotkey_hide=next[0].clone();changed=true;}
+                            if next[1]!=self.settings.hotkey_minimal {self.settings.hotkey_minimal=next[1].clone();changed=true;}
+                            if next[2]!=self.settings.hotkey_idle {self.settings.hotkey_idle=next[2].clone();changed=true;}
+                            if changed {self.settings.save();}
                             ui.add_space(3.0);
                             ui.label(egui::RichText::new("快捷键在任意窗口下都生效；隐藏后托盘图标仍可恢复。").size(11.5)
+                                .color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(105))));
+                            ui.label(egui::RichText::new("「空闲形态」按一次换一种：黑条 → 圆点 → 完全隐入，循环切换。").size(11.5)
                                 .color(settings_color(ctx,Color32::from_gray(180),Color32::from_gray(105))));
                         });
                         settings_label(ui,"提醒与隐私");

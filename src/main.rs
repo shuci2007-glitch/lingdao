@@ -60,12 +60,14 @@ struct Shell {
     /// 用户用快捷键把岛完全收起来（不留细线，也不接受鼠标）。
     user_hidden: bool,
     /// 上次下发给键盘钩子的快捷键组合。
-    hotkey_sig: (String, String),
+    hotkey_sig: (String, String, String),
 }
 
 impl Shell {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = App::new(&cc.egui_ctx, Options::default());
+        // 全局快捷键按下时用它立刻唤醒一帧，空闲状态下不会拖到下一个重绘周期才响应。
+        lingdao::input::set_wake_context(cc.egui_ctx.clone());
         #[cfg(feature="record")] let quota_demo=std::env::var("DAOZAI_QUOTA_DEMO").is_ok();
         #[cfg(not(feature="record"))] let quota_demo=false;
         if !quota_demo{app.quota_initialize();}
@@ -109,8 +111,7 @@ impl Shell {
             #[cfg(windows)] system_rx,
             fullscreen:false,
             input_state:lingdao::input::Monitor::new(initial_input),
-            #[cfg(windows)] input_keys:lingdao::input::Shortcuts::start(),
-            #[cfg(windows)] mouse:lingdao::input::start_mouse(),
+            #[cfg(windows)] input_keys:lingdao::input::Shortcuts::start(),            #[cfg(windows)] mouse:lingdao::input::start_mouse(),
             #[cfg(windows)] incoming,
             #[cfg(windows)] hidden:false,
             #[cfg(windows)]
@@ -131,7 +132,7 @@ impl Shell {
             quota: lingdao::quota::Service::start(), quota_sig: None, quota_at: PollClock::default(),
             clip_clear: None,
             user_hidden: false,
-            hotkey_sig: (String::new(), String::new()),
+            hotkey_sig: (String::new(), String::new(), String::new()),
         }
     }
 
@@ -234,9 +235,9 @@ impl eframe::App for Shell {
         self.poll_tray();
         // 全局快捷键：绑定变了就下发一次，再看有没有按下。
         lingdao::smtc::set_deep_media(self.app.settings.media_deep);
-        let sig = (self.app.settings.hotkey_hide.clone(), self.app.settings.hotkey_minimal.clone());
+        let sig = (self.app.settings.hotkey_hide.clone(), self.app.settings.hotkey_minimal.clone(), self.app.settings.hotkey_idle.clone());
         if sig != self.hotkey_sig {
-            lingdao::input::set_hotkeys(&sig.0, &sig.1);
+            lingdao::input::set_hotkeys(&sig.0, &sig.1, &sig.2);
             self.hotkey_sig = sig;
         }
         let hotkey = lingdao::input::take_hotkey();
@@ -253,6 +254,12 @@ impl eframe::App for Shell {
             let next = !self.app.settings.minimal;
             self.app.set_minimal(next);
             self.app.say(if next { "极简刘海已打开" } else { "极简刘海已关闭" });
+        }
+        if hotkey & 4 != 0 {
+            // 空闲形态轮换：黑条 → 圆点 → 完全隐入 → 黑条。
+            let label = self.app.cycle_idle_mode();
+            self.app.say(format!("空闲形态：{label}"));
+            ctx.request_repaint();
         }
         #[cfg(windows)]
         if lingdao::native::take_foreground_change() {

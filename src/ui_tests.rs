@@ -3521,6 +3521,29 @@ fn idle_mode_pill_and_hidden_take_effect() {
 }
 
 #[test]
+fn idle_mode_hotkey_cycles_through_all_three_states() {
+    let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
+    let mut h=H::new();
+    // 快捷键轮换：黑条 → 圆点 → 完全隐入 → 黑条，并且每次都要落盘。
+    h.app.settings.idle_mode=crate::model::IdleMode::Bar;
+    assert_eq!(h.app.cycle_idle_mode(), crate::model::IdleMode::Drop.label());
+    assert_eq!(h.app.settings.idle_mode, crate::model::IdleMode::Drop);
+    assert_eq!(crate::model::Settings::load().idle_mode, crate::model::IdleMode::Drop, "轮换结果要持久化");
+
+    assert_eq!(h.app.cycle_idle_mode(), crate::model::IdleMode::Hidden.label());
+    assert_eq!(crate::model::Settings::load().idle_mode, crate::model::IdleMode::Hidden);
+
+    assert_eq!(h.app.cycle_idle_mode(), crate::model::IdleMode::Bar.label());
+    assert_eq!(crate::model::Settings::load().idle_mode, crate::model::IdleMode::Bar);
+
+    // 轮换后要真的生效：切到「完全隐入」后区域应裁成 0。
+    h.app.cycle_idle_mode(); // Bar → Drop
+    h.app.cycle_idle_mode(); // Drop → Hidden
+    for _ in 0..180 { h.frame(vec![]); }
+    assert!(h.region.width() < 1.0, "轮换到完全隐入后应收成空，实际 {}", h.region.width());
+}
+
+#[test]
 fn manual_minimal_does_not_override_pill_and_tap_opens_island() {
     let _g=ENV_LOCK.lock().unwrap_or_else(|e|e.into_inner());
     // 开了「极简刘海」时，用户选「自动小药丸」仍应是药丸（不能被细线覆盖）。

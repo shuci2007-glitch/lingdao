@@ -124,9 +124,11 @@ mod shortcuts {
     use std::cell::RefCell;
     use windows::Win32::{Foundation::{HINSTANCE,LPARAM,LRESULT,WPARAM},System::LibraryLoader::GetModuleHandleW,UI::WindowsAndMessaging::*};
     thread_local!{static KEYS:RefCell<SwitchKeys>=RefCell::new(SwitchKeys::default());}
-    /// 全局快捷键：绑定表与待处理标记（bit0 = 切换隐藏，bit1 = 切换极简）。
+    /// 全局快捷键：绑定表与待处理标记
+    /// （bit0 = 切换隐藏，bit1 = 切换极简，bit2 = 轮换空闲形态）。
     static BIND_HIDE:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);
     static BIND_MINIMAL:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);
+    static BIND_IDLE:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);
     static HOTKEY:std::sync::atomic::AtomicU32=std::sync::atomic::AtomicU32::new(0);
     /// 高 8 位装修饰键（1=Ctrl 2=Alt 4=Shift），低 8 位装虚拟键码；0 表示不绑定。
     fn binding(key:&str)->u32{
@@ -135,6 +137,8 @@ mod shortcuts {
             "ctrl_alt_m"=>(3,0x4D),
             "ctrl_alt_space"=>(3,0x20),
             "alt_shift_d"=>(6,0x44),
+            "ctrl_alt_i"=>(3,0x49),
+            "alt_shift_i"=>(6,0x49),
             _=>(0,0),
         };
         if vk==0{0}else{(mods<<8)|vk}
@@ -147,10 +151,11 @@ mod shortcuts {
         pub fn allows(&self,context:(usize,usize))->bool{KEYS.with(|keys|keys.borrow_mut().allows(context,Instant::now()))}
         pub fn clear(&self){KEYS.with(|keys|keys.borrow_mut().clear());SWITCH_AT.store(0,std::sync::atomic::Ordering::Relaxed);}
         /// 设置页改完快捷键后调用；字符串会是 `model::hotkey` 校验过的白名单值。
-        pub fn bind(hide:&str,minimal:&str){
+        pub fn bind(hide:&str,minimal:&str,idle:&str){
             use std::sync::atomic::Ordering;
             BIND_HIDE.store(binding(hide),Ordering::Relaxed);
             BIND_MINIMAL.store(binding(minimal),Ordering::Relaxed);
+            BIND_IDLE.store(binding(idle),Ordering::Relaxed);
         }
         /// 取走并清空键盘钩子记下的快捷键事件。
         pub fn take()->u32{use std::sync::atomic::Ordering;HOTKEY.swap(0,Ordering::Relaxed)}
@@ -175,8 +180,14 @@ mod shortcuts {
                         |(((GetAsyncKeyState(VK_SHIFT.0 as i32)<0)as u32)<<2);
                     let code=(held<<8)|event.vkCode;
                     if code!=0 {
+                        // 同一组合被绑到多个动作时（旧配置或被手改过的文件）只算第一个，
+                        // 免得一次按键同时收起来又换形态。
+                        let mut hit=true;
                         if code==BIND_HIDE.load(Ordering::Relaxed){HOTKEY.fetch_or(1,Ordering::Relaxed);}
-                        if code==BIND_MINIMAL.load(Ordering::Relaxed){HOTKEY.fetch_or(2,Ordering::Relaxed);}
+                        else if code==BIND_MINIMAL.load(Ordering::Relaxed){HOTKEY.fetch_or(2,Ordering::Relaxed);}
+                        else if code==BIND_IDLE.load(Ordering::Relaxed){HOTKEY.fetch_or(4,Ordering::Relaxed);}
+                        else {hit=false;}
+                        if hit {super::wake();}
                     }
                 }
                 KEYS.with(|keys|{
@@ -232,16 +243,23 @@ pub fn cursor_near_top(threshold: i32) -> bool {
 pub fn cursor_near_top(_threshold: i32) -> bool { false }
 
 /// 设置页改完快捷键后调用，绑定立刻生效。
-pub fn set_hotkeys(hide: &str, minimal: &str) {
+pub fn set_hotkeys(hide: &str, minimal: &str, idle: &str) {
     #[cfg(windows)]
-    Shortcuts::bind(hide, minimal);
+    Shortcuts::bind(hide, minimal, idle);
     #[cfg(not(windows))]
     {
-        let _ = (hide, minimal);
+        let _ = (hide, minimal, idle);
     }
 }
 
-/// 取走键盘钩子记下的全局快捷键事件（bit0 切换隐藏，bit1 切换极简）。
+/// 界面上下文：按下全局快捷键时立刻唤醒一帧。
+/// 空闲时重绘间隔最长 1 秒，不主动唤醒的话按下去要等最多 1 秒才反应。
+static WAKE: std::sync::OnceLock<eframe::egui::Context> = std::sync::OnceLock::new();
+pub fn set_wake_context(ctx: eframe::egui::Context) { let _ = WAKE.set(ctx); }
+#[cfg(windows)]
+fn wake() { if let Some(ctx) = WAKE.get() { ctx.request_repaint(); } }
+
+/// 取走键盘钩子记下的全局快捷键事件（bit0 切换隐藏，bit1 切换极简，bit2 轮换空闲形态）。
 pub fn take_hotkey() -> u32 {
     #[cfg(windows)]
     {
