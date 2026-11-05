@@ -39,10 +39,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
     $archive = Join-Path $outputDirectory "$packageName.zip"
     Compress-Archive -LiteralPath $stagingDirectory -DestinationPath $archive
-    @($setup, $archive) | ForEach-Object {
+    $lines = @($setup, $archive) | ForEach-Object {
         $checksum = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
         "$checksum  $([IO.Path]::GetFileName($_))"
-    } | Set-Content -LiteralPath (Join-Path $outputDirectory 'SHA256SUMS.txt') -Encoding ascii
+    }
+    # 用 LF 换行写出：这样 `sha256sum -c SHA256SUMS.txt` 在 Git Bash / WSL / Linux 下能直接校验，
+    # Set-Content 默认的 CRLF 会让文件名带上 \r 而报「No such file or directory」。
+    [IO.File]::WriteAllText(
+        (Join-Path $outputDirectory 'SHA256SUMS.txt'),
+        (($lines -join "`n") + "`n"),
+        [Text.Encoding]::ASCII
+    )
     Write-Output $setup
     Write-Output $archive
 } finally { Pop-Location }
