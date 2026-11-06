@@ -32,6 +32,13 @@ pub(crate) const HUD_TRACK_X: f32 = 48.0;
 pub(crate) const HUD_TRACK_W: f32 = 150.0;
 pub const BAR_W_MIN: f32 = 44.0; // 极简小条
 pub const BAR_H_MIN: f32 = 4.5;
+/// 灵岛「水滴」：收成正圆小黑丸的直径。
+pub const IDLE_DROP_W: f32 = 18.0;
+pub const IDLE_DROP_H: f32 = 18.0;
+
+/// 空闲时应呈现的形态。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Present { Bar, Pill }
 pub const FLARE: f32 = 17.6; // 顶部外翻肩宽
 pub const FLARE_H: f32 = 16.0; // 外翻收敛高度
 pub const RAD: f32 = 33.0; // 底部圆角
@@ -589,6 +596,14 @@ pub struct App {
     wheel_at: f64,
     wheel_page_at: f64,
 
+    // 灵岛「水滴」空闲形态：圆点被屏顶吸走的进度与水花。
+    idle_drop: f32,
+    idle_drop_recede: bool,
+    idle_splash: f32,
+    idle_splashed: bool,
+    idle_preview_until: f64,
+    near_top_now: bool,
+
     // 拖入
     pub(crate) drag_hot: bool,
     pub(crate) drag_a: f32,
@@ -745,6 +760,12 @@ impl App {
             wheel_delta: 0.0,
             wheel_at: -1.0,
             wheel_page_at: -1.0,
+            idle_drop: 0.0,
+            idle_drop_recede: false,
+            idle_splash: 0.0,
+            idle_splashed: false,
+            idle_preview_until: 0.0,
+            near_top_now: false,
             drag_hot: false,
             drag_a: 0.0,
             drag_saved: None,
@@ -1369,7 +1390,45 @@ impl App {
         self.island_lyric_layout=Some(galley);
     }
 
-    pub(crate) fn effective_minimal(&self)->bool {self.settings.minimal || self.browser_minimal_active}
+    /// 是否处于「空闲」：没有展开、提醒、吐司、铃铛、岛上歌词或编辑态。
+    fn idle(&self)->bool {
+        !self.open
+            && self.notice.is_none()
+            && self.toast.is_none()
+            && self.t >= self.notification_bell_until
+            && !self.island_lyrics_active()
+            && !self.is_editing()
+    }
+    fn previewing(&self)->bool { self.t < self.idle_preview_until }
+    /// 用户选择的空闲形态对应的呈现方式；左右停靠时不走水滴。
+    fn selected_present(&self)->Present {
+        match self.settings.idle_mode {
+            model::IdleMode::Drop if !self.settings.dock.is_side() => Present::Pill,
+            _ => Present::Bar,
+        }
+    }
+    /// 是否应收成「水滴」圆点。
+    fn idle_pill(&self)->bool {
+        if self.previewing() && !self.open && self.notice.is_none() && !self.is_editing() {
+            return matches!(self.selected_present(), Present::Pill);
+        }
+        self.idle() && matches!(self.selected_present(), Present::Pill)
+    }
+    /// 是否强制细线：浏览器避让；或手动「极简刘海」且空闲形态为「黑条」。
+    fn thin_forced(&self)->bool {
+        !self.previewing()
+            && (self.settings.dock.is_side() || self.settings.idle_mode == model::IdleMode::Bar)
+            && (self.browser_minimal_active || self.settings.minimal)
+    }
+    /// 切换空闲形态后强制预览一次（设置里点选时调用）。
+    pub(crate) fn preview_idle_mode(&mut self) {
+        self.idle_preview_until = self.t + 5.0;
+        self.idle_drop = 0.0;
+        self.idle_drop_recede = false;
+        self.idle_splash = 0.0;
+        self.idle_splashed = false;
+    }
+    pub(crate) fn effective_minimal(&self)->bool { self.thin_forced() || self.idle_pill() }
     pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal() && !self.side()}
     pub(crate) fn pet_space(&self)->f32 {if self.pet_enabled(){44.0}else{0.0}}
     fn lyric_focus_space(&self)->f32 {if self.pomo.running{crate::focus_bar::LYRIC_WIDTH+10.0}else{0.0}}
@@ -1395,7 +1454,14 @@ impl App {
         if self.island_lyrics_active() {
             (self.lyric_bar_width(),BAR_H)
         } else if self.effective_minimal()&&self.t>=self.notification_bell_until {
-            (BAR_W_MIN, BAR_H_MIN)
+            if self.idle_pill() {
+                // 圆点：收束直接落到正圆小黑丸（不经过扁药丸），随后被屏顶吸走。
+                let e = smoothstep(0.0, 1.0, self.idle_drop);
+                let s = 1.0 - 0.22 * e;
+                (IDLE_DROP_W * s, IDLE_DROP_H * s)
+            } else {
+                (BAR_W_MIN, BAR_H_MIN)
+            }
         } else {
             (self.resident.target.width.min(WIN_W-32.0), BAR_H)
         }
@@ -1521,6 +1587,11 @@ impl App {
         let hit = if side {self.side_hit_rect(win,p_prev)} else {self.hit_rect(cx, top, p_prev)};
         let previous_menu=self.shelf_menu_rect.take();
         let inside = env.cursor.is_some_and(|c| hit.contains(c) || previous_menu.is_some_and(|r|r.contains(c)));
+        // 光标同时「贴顶」且横向在岛体中心附近才算靠近（供水滴回落预览）。
+        self.near_top_now = !self.open && !side && match env.cursor {
+            Some(c) => c.y <= 48.0 && (c.x - cx).abs() <= 220.0,
+            None => false,
+        };
         let on_notice=env.cursor.is_some_and(|c|self.messenger_badge_rect(win,self.island_rect(win,self.w.pos,self.h.pos)).is_some_and(|r|r.contains(c)) || self.notice_rect(cx,top).is_some_and(|r|r.contains(c))||self.notice_details_rect(cx,top).is_some_and(|r|r.contains(c)));
         if !inside {
             self.hover_lock = false;
@@ -1584,20 +1655,50 @@ impl App {
         } else {self.wheel_delta=0.0;}
         let want = (inside && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
+        // 「水滴」：岛先收成正圆小黑丸（宽度收到圆点量级即算落定），随后 idle_drop 0→1
+        // 把它向上吸进屏顶；光标贴顶时回落，保持可见供交互。
+        let collapsed = self.w.pos < IDLE_DROP_W + 12.0 && self.h.pos < IDLE_DROP_H + 14.0;
+        let drop_pill = self.idle_pill() && collapsed;
+        if drop_pill && self.near_top_now {
+            self.idle_drop_recede = true;
+        }
+        if !self.near_top_now {
+            self.idle_drop_recede = false;
+        }
+        let drop_target = if !drop_pill || self.idle_drop_recede { 0.0 } else { 1.0 };
+        if drop_target >= 1.0 {
+            self.idle_drop = (self.idle_drop + dt / 1.15).min(1.0);
+        } else {
+            self.idle_drop = anim::approach(self.idle_drop, 0.0, 6.0, dt);
+        }
+        // 圆点贴上「水面」（屏顶）的瞬间触发一次性水花。
+        const SPLASH_AT: f32 = 0.36;
+        let at_surface = self.idle_drop >= SPLASH_AT && drop_target >= 1.0;
+        if at_surface && !self.idle_splashed {
+            self.idle_splash = 1.0;
+        }
+        self.idle_splashed = at_surface;
+        if self.idle_splash > 0.0 {
+            self.idle_splash = (self.idle_splash - dt / 0.9).max(0.0);
+        }
         self.update_pet(env, cx);
 
         // ---------- 绘制 ----------
         let p = self.progress();
         let (w, h) = (self.w.pos, self.h.pos);
-        let panel = self.island_rect(win, w, h);
+        let pc = anim::clamp01(p);
+        let minimal_pill = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until && pc < 0.02;
+        // 水滴：只在宽度已收到圆点量级时换成正圆，并随 idle_drop 向上被屏顶吸走。
+        let drop_visual = minimal_pill && self.idle_pill() && w < 26.0;
+        let de = if drop_visual { smoothstep(0.30, 1.0, self.idle_drop) } else { 0.0 };
+        let sink = de * (h + 6.0);
+        let panel = self.island_rect(win, w, h).translate(Vec2::new(0.0, -sink));
         let messenger_rect=self.messenger_badge_rect(win,panel);
         let appear=self.messenger_appear();
         let outside_badge=messenger_rect.filter(|_|appear>0.02);
-        let pc = anim::clamp01(p);
         let painter = ui.painter_at(ui.max_rect().expand(40.0));
         let feather = 1.0 / ctx.pixels_per_point();
         let body=messenger_rect.filter(|_|outside_badge.is_none()).map_or(panel,|badge|panel.union(badge));
-        let minimal_pill = self.effective_minimal() && !self.island_lyrics_active() && self.notice.is_none() && self.t>=self.notification_bell_until && pc < 0.02;
         let flare = if minimal_pill || pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
         let thickness = if side { crate::side_dock::SIDE_BAR_W } else { BAR_H };
@@ -1613,7 +1714,7 @@ impl App {
         let skin_shadow = if !glass_skin {1.0} else if env.glass_blur {0.75} else {0.7};
         let shadow_k = glass::shadow_alpha(0.0, thick) / 0.12 * skin_shadow;
         let island_shadow=|r:Rect,flare:f32,flare_h:f32,radius:f32,strength:f32| if pill {pill_shadow(&painter,r,radius,strength)} else if side {shape::shadow_docked(&painter,r,dock,flare,flare_h,radius,strength)} else {shape::shadow(&painter,r,flare,flare_h,radius,strength)};
-        island_shadow(body, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k);
+        if !drop_visual { island_shadow(body, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k); }
         let notice_rect=self.notice_rect(cx,top);
         let notice_shape=notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max));
         if let Some(r)=notice_shape {island_shadow(r,5.0,8.0,12.5,0.5*shadow_k);}
@@ -1637,7 +1738,11 @@ impl App {
             if !self.open || self.page!=0 || self.media.title.is_empty(){self.fluid.set_seek(None,0.0);}
             self.fluid.advance(env.t,dt);
         }
-        self.paint_body(&painter, body, flare, flare_h, radius, feather);
+        if drop_visual {
+            Self::paint_drop(&painter, cx, top, w, h, de, self.idle_splash);
+        } else {
+            self.paint_body(&painter, body, flare, flare_h, radius, feather);
+        }
         if let Some(r)=notice_shape {self.paint_body(&painter,r,5.0,8.0,12.5,feather);}
         let content_from=crate::skin_paint::shape_count(&ctx,layer);
 
@@ -1757,7 +1862,14 @@ impl App {
             Rect::from_center_size(Pos2::new(cx, top + height/2.0), Vec2::new(PW + FLARE * 2.0 + 56.0, height))
         } else {
             let (bw, bh) = self.base_size();
-            Rect::from_center_size(Pos2::new(cx, top + (bh * SWELL.1 + 12.0) / 2.0), Vec2::new(bw * SWELL.0 + 24.0, bh * SWELL.1 + 12.0))
+            // 圆点融入时要露出涟漪（横向要扩到 6r 外）和水面：裁剪区窄了涟漪直接被切掉。
+            if self.idle_pill() && (self.idle_drop > 0.001 || self.idle_splash > 0.001) {
+                let wide = (bw * SWELL.0 + 24.0).max(124.0);
+                let tall = (bh * SWELL.1 + 12.0).max(30.0);
+                Rect::from_min_size(Pos2::new(cx - wide / 2.0, top), Vec2::new(wide, tall))
+            } else {
+                Rect::from_center_size(Pos2::new(cx, top + (bh * SWELL.1 + 12.0) / 2.0), Vec2::new(bw * SWELL.0 + 24.0, bh * SWELL.1 + 12.0))
+            }
         };
         if let Some(r)=messenger_rect{region=region.union(r.expand(5.0));}
         if let Some(rect)=notice_shape {region=region.union(rect.expand2(Vec2::new(12.0,8.0)));}
@@ -1818,8 +1930,8 @@ impl App {
         let ambient=self.settings.skin==model::Skin::Fluid && self.fluid.animating() || self.pomo.running && (self.open && self.page==1 || !self.open && !minimal_pill && self.notice.is_none() && bar::animations_enabled())
             || self.media.playing && (self.open && self.page==0 || !self.open && !minimal_pill && self.notice.is_none() && self.media.is_music())
             || self.notice.as_ref().is_some_and(|notice|notice.meeting.is_some());
-        // 涟漪（水面吞掉 / water_ring）未归位时也当作动画，避免退化为 1 秒一帧（曾经卡成幻灯片）。
-        let splashing=!self.water_ring.settled(1.0);
+        // 涟漪（水面吞掉 / water_ring）与「水滴」未归位时也当作动画，避免退化为 1 秒一帧。
+        let splashing=!self.water_ring.settled(1.0) || self.idle_drop > 0.001 || self.idle_splash > 0.001;
         let animating=transitioning || splashing || ambient || pet_visible && self.pet.state!=PetState::Sleeping;
         // 交互形变保持 60 帧，媒体 30 帧；小表情 20 帧，睡眠 10 帧，涟漪 60 帧，静态界面每秒核对提醒。
         let repaint_after=std::time::Duration::from_secs_f64(if transitioning{1.0/60.0}else if splashing{1.0/60.0}else if ambient{1.0/30.0}else if pet_visible{if self.pet.state==PetState::Sleeping{0.1}else{0.05}}else{1.0});
@@ -2109,6 +2221,75 @@ impl App {
     }
 
     /// 悬停状态机：意图缓冲 → 弹簧展开 → 离开延迟 → 临界阻尼收起；全程可打断。
+    /// 水滴被「水面」（屏顶）吞掉时的几何。
+    /// 返回 `(rx, ry, 圆心相对水面的 y, 底部相对水面的距离, 透明度)`。
+    /// 关键性质：底部距离随 `de` 单调减小到 0，而顶边始终贴在水面上——
+    /// 也就是「上部先没入水面，下部逐渐跟着收进去」。
+    pub(crate) fn drop_shape(de: f32, w: f32, h: f32) -> (f32, f32, f32, f32, f32) {
+        let stretch = 1.0 + 0.26 * smoothstep(0.0, 0.45, de);
+        let squeeze = (1.0 - 0.10 * smoothstep(0.0, 0.55, de)) * (1.0 - 0.45 * smoothstep(0.74, 1.0, de));
+        let visible = h * (1.0 - smoothstep(0.06, 1.0, de));
+        let ry = (h / 2.0) * stretch;
+        let rx = (w / 2.0) * squeeze;
+        (rx, ry, visible - ry, visible, (1.0 - smoothstep(0.92, 1.0, de)).clamp(0.0, 1.0))
+    }
+
+    /// 画一颗贴在屏顶的正圆小黑丸：上部先没入水面，下部逐渐收进去；接触瞬间溅起涟漪与反弹小水滴。
+    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32) {
+        let r = (w.min(h) / 2.0).max(1.0);
+        let surface = top;
+        let (rx, ry, cy_rel, visible, alpha) = Self::drop_shape(de, w, h);
+        let cy = surface + cy_rel;
+        if alpha > 0.004 && visible > 0.05 {
+            // 只画水面以下：被裁掉的那一截就是「先融进顶部的上半部分」。
+            let clip = Rect::from_min_max(
+                Pos2::new(cx - rx - 2.0, surface),
+                Pos2::new(cx + rx + 2.0, surface + h + 4.0),
+            );
+            let p = painter.with_clip_rect(clip);
+            let fill = Color32::from_black_alpha((alpha * 255.0) as u8);
+            p.add(egui::epaint::EllipseShape::filled(Pos2::new(cx, cy), Vec2::new(rx, ry), fill));
+            // 水面分界：接触处一条极细的亮线，让「水」和「空气」有一条边界。
+            let k = (1.0 - smoothstep(0.50, 0.86, de)).clamp(0.0, 1.0);
+            if k > 0.02 {
+                let a = (k * 0.55 * alpha * 255.0) as u8;
+                p.line_segment(
+                    [Pos2::new(cx - rx, surface + 0.5), Pos2::new(cx + rx, surface + 0.5)],
+                    egui::Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(150, 220, 255, a)),
+                );
+            }
+        }
+        // 水花：涟漪 + 反弹小水滴。
+        if splash > 0.001 {
+            let local = 1.0 - splash; // 0=刚接触，1=水花散尽
+            const RIPPLES: usize = 2;
+            let ripple_color = |a: f32| -> Color32 {
+                Color32::from_rgba_unmultiplied(150, 220, 255, (a.clamp(0.0, 1.0) * 255.0) as u8)
+            };
+            for i in 0..RIPPLES {
+                let ph = (local - i as f32 * 0.16).clamp(0.0, 1.0);
+                if ph <= 0.001 { continue; }
+                let rx = (ph * r * 6.0).max(1.0);
+                let ry = rx * 0.32; // 水面视角，纵向压扁
+                let a = (1.0 - ph) * 0.55;
+                if a <= 0.004 { continue; }
+                painter.add(egui::epaint::EllipseShape::stroke(
+                    Pos2::new(cx, top),
+                    Vec2::new(rx, ry),
+                    egui::Stroke::new(1.5_f32, ripple_color(a)),
+                ));
+            }
+            // 反弹小水滴：主体被吞掉大半之后，水面才甩出一颗更小的水珠。
+            let rise = smoothstep(0.40, 1.0, local);
+            let y = top + h * 0.30 - h * 0.78 * rise;
+            let rs = (r * 0.30 * (1.0 - smoothstep(0.55, 1.0, local))).max(0.0);
+            let a = (1.0 - smoothstep(0.70, 0.99, local)).clamp(0.0, 1.0);
+            if a > 0.004 && rs > 0.3 {
+                painter.circle_filled(Pos2::new(cx, y), rs, Color32::from_black_alpha((a * 255.0) as u8));
+            }
+        }
+    }
+
     fn morph(&mut self, want: bool, inside: bool, t: f64, dt: f32) {
         let (bw, bh) = self.base_size();
         if want {

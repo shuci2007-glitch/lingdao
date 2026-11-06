@@ -169,6 +169,27 @@ impl Dock {
     pub fn is_side(self) -> bool { self != Self::Top }
 }
 
+/// 灵岛空闲形态：黑条 / 水滴（收成正圆被屏顶吸走并溅起水花）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IdleMode {
+    #[default]
+    Bar,
+    Drop,
+}
+
+impl IdleMode {
+    pub const ALL: [IdleMode; 2] = [IdleMode::Bar, IdleMode::Drop];
+    pub fn key(self) -> &'static str {
+        match self { Self::Bar => "bar", Self::Drop => "drop" }
+    }
+    pub fn parse(value: &str) -> Self {
+        match value { "drop" => Self::Drop, _ => Self::Bar }
+    }
+    pub fn label(self) -> &'static str {
+        match self { Self::Bar => "黑条", Self::Drop => "水滴" }
+    }
+}
+
 /// 岛体大小（百分比）的范围与步进。
 pub const ISLAND_SIZE_MIN: u32 = 80;
 pub const ISLAND_SIZE_MAX: u32 = 140;
@@ -192,6 +213,8 @@ pub struct Settings {
     pub island_offset: i32,
     /// 停靠边缘；左右停靠时 `island_offset` 表示上下位置。
     pub dock: Dock,
+    /// 空闲形态：黑条 / 水滴 / 完全隐入。
+    pub idle_mode: IdleMode,
     pub settings_theme: crate::settings_theme::SettingsTheme,
     pub pet: bool,
     /// 灵岛嘴巴：按表情切换（一条线 / 收成一个点），可关。
@@ -245,7 +268,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
     }
 }
 
@@ -286,6 +309,7 @@ impl Settings {
                 }
                 "island_shape" => s.island_shape = IslandShape::parse(&v),
                 "dock" => s.dock = Dock::parse(&v),
+                "idle_mode" => s.idle_mode = IdleMode::parse(&v),
                 "glass_blur" => s.glass_blur = v != "0",
                 "island_size" => s.island_size = island_size_value(v.parse::<u32>().unwrap_or(100)),
                 "island_offset" => s.island_offset = v.parse::<i32>().unwrap_or(0).clamp(-ISLAND_OFFSET_MAX, ISLAND_OFFSET_MAX),
@@ -357,6 +381,7 @@ impl Settings {
                 ("skin".into(),self.skin.key().into()),
                 ("island_shape".into(),self.island_shape.key().into()),
                 ("dock".into(),self.dock.key().into()),
+                ("idle_mode".into(),self.idle_mode.key().into()),
                 ("glass_blur".into(),(self.glass_blur as u8).to_string()),
                 ("island_size".into(),island_size_value(self.island_size).to_string()),
                 ("island_offset".into(),self.island_offset.clamp(-ISLAND_OFFSET_MAX,ISLAND_OFFSET_MAX).to_string()),

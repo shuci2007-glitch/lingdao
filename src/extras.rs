@@ -1288,6 +1288,12 @@ impl App {
                             setting_row(ui,"灵岛嘴巴","随表情切换：一条线或收成一个点",&mut self.settings.pet_mouth);
                             ui.separator();
                             setting_number(ui,"眼睛灵敏度",&mut self.settings.pet_eye_speed,0.3,2.5," 倍",0.1);
+                            ui.separator();
+                            let idle_before=self.settings.idle_mode;
+                            let mut idle_drop=idle_before==crate::model::IdleMode::Drop;
+                            setting_row(ui,"空闲水滴","收起后收成正圆，被屏顶吸进去并溅起水花",&mut idle_drop);
+                            let idle_after=if idle_drop {crate::model::IdleMode::Drop}else{crate::model::IdleMode::Bar};
+                            if idle_after!=idle_before {self.settings.idle_mode=idle_after;self.preview_idle_mode();self.settings.save();}
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");
