@@ -1774,7 +1774,7 @@ impl App {
             self.fluid.advance(env.t,dt);
         }
         if drop_visual {
-            Self::paint_drop(&painter, cx, top, w, h, de, self.idle_splash);
+            Self::paint_drop(&painter, cx, top, w, h, de, self.idle_splash, self.glass_fill());
         } else {
             self.paint_body(&painter, body, flare, flare_h, radius, feather);
         }
@@ -2270,9 +2270,14 @@ impl App {
     }
 
     /// 画一颗贴在屏顶的正圆小黑丸：上部先没入水面，下部逐渐收进去；接触瞬间溅起涟漪与反弹小水滴。
-    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32) {
+    /// `skin` 是当前皮肤底色，让水滴与岛体同色。
+    fn paint_drop(painter: &egui::Painter, cx: f32, top: f32, w: f32, h: f32, de: f32, splash: f32, skin: Color32) {
         let r = (w.min(h) / 2.0).max(1.0);
         let surface = top;
+        // 水滴用皮肤底色；涟漪/水面线用同色提亮，避免和浅色皮肤撞色。
+        let lift = |c: u8| (c as f32 * 0.35 + 255.0 * 0.65).round() as u8;
+        let water = (lift(skin.r()), lift(skin.g()), lift(skin.b()));
+        let ink = |a: u8| Color32::from_rgba_unmultiplied(skin.r(), skin.g(), skin.b(), a);
         let (rx, ry, cy_rel, visible, alpha) = Self::drop_shape(de, w, h);
         let cy = surface + cy_rel;
         if alpha > 0.004 && visible > 0.05 {
@@ -2282,15 +2287,14 @@ impl App {
                 Pos2::new(cx + rx + 2.0, surface + h + 4.0),
             );
             let p = painter.with_clip_rect(clip);
-            let fill = Color32::from_black_alpha((alpha * 255.0) as u8);
-            p.add(egui::epaint::EllipseShape::filled(Pos2::new(cx, cy), Vec2::new(rx, ry), fill));
+            p.add(egui::epaint::EllipseShape::filled(Pos2::new(cx, cy), Vec2::new(rx, ry), ink((alpha * 255.0) as u8)));
             // 水面分界：接触处一条极细的亮线，让「水」和「空气」有一条边界。
             let k = (1.0 - smoothstep(0.50, 0.86, de)).clamp(0.0, 1.0);
             if k > 0.02 {
                 let a = (k * 0.55 * alpha * 255.0) as u8;
                 p.line_segment(
                     [Pos2::new(cx - rx, surface + 0.5), Pos2::new(cx + rx, surface + 0.5)],
-                    egui::Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(150, 220, 255, a)),
+                    egui::Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(water.0, water.1, water.2, a)),
                 );
             }
         }
@@ -2299,7 +2303,7 @@ impl App {
             let local = 1.0 - splash; // 0=刚接触，1=水花散尽
             const RIPPLES: usize = 2;
             let ripple_color = |a: f32| -> Color32 {
-                Color32::from_rgba_unmultiplied(150, 220, 255, (a.clamp(0.0, 1.0) * 255.0) as u8)
+                Color32::from_rgba_unmultiplied(water.0, water.1, water.2, (a.clamp(0.0, 1.0) * 255.0) as u8)
             };
             for i in 0..RIPPLES {
                 let ph = (local - i as f32 * 0.16).clamp(0.0, 1.0);
@@ -2320,7 +2324,7 @@ impl App {
             let rs = (r * 0.30 * (1.0 - smoothstep(0.55, 1.0, local))).max(0.0);
             let a = (1.0 - smoothstep(0.70, 0.99, local)).clamp(0.0, 1.0);
             if a > 0.004 && rs > 0.3 {
-                painter.circle_filled(Pos2::new(cx, y), rs, Color32::from_black_alpha((a * 255.0) as u8));
+                painter.circle_filled(Pos2::new(cx, y), rs, ink((a * 255.0) as u8));
             }
         }
     }
