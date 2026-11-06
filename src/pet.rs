@@ -1,4 +1,4 @@
-//! 岛仔的原生矢量表情与连续形变。
+//! 灵岛的原生矢量表情与连续形变。
 use crate::anim::{approach, lerp, smoothstep};
 use crate::paint::{Card, H};
 use crate::theme::{self, W};
@@ -134,12 +134,19 @@ pub(crate) struct Pet {
     eyes: [Eye; 2],
     gaze: [f32; 2],
     y: f32,
+    /// 嘴巴：[半宽, 张开度, 弧度]。张开度小时画成一条线，大时收成一个点/小口。
+    mouth: [f32; 3],
+    /// 是否画嘴巴（设置里可关）。
+    pub mouth_enabled: bool,
+    /// 眼睛跟随鼠标的灵敏度倍率（设置里可调）。
+    pub eye_speed: f32,
 }
 
 impl Default for Pet {
     fn default() -> Self {
         Self { state: PetState::Awake, reaction: None, waking_until: 0.0, last_idle: 0.0,
-            hovered: false, worried: false, age: 0.0, eyes: [Eye::open(4.4); 2], gaze: [0.0; 2], y: 0.0 }
+            hovered: false, worried: false, age: 0.0, eyes: [Eye::open(4.4); 2], gaze: [0.0; 2], y: 0.0,
+            mouth: [2.0, 0.12, 0.35], mouth_enabled: true, eye_speed: 1.0 }
     }
 }
 
@@ -213,7 +220,23 @@ impl Pet {
         }
         let eye_dt=if state==PetState::Music {dt*0.2}else{dt};
         for (eye, goal) in self.eyes.iter_mut().zip(eyes) { eye.follow(goal, eye_dt); }
-        for (axis, goal) in self.gaze.iter_mut().zip(look) { *axis = approach(*axis, goal, 10.0, dt); }
+        // 嘴巴按表情切换：张开度小=一条线，大=收成一个点/小口。
+        let mouth_goal: [f32; 3] = match state {
+            PetState::Awake => [2.0, 0.12, 0.35],
+            PetState::Curious => [1.7, 0.50, 0.0],
+            PetState::Waking => [1.4, 0.40, 0.0],
+            PetState::Happy => [2.7, 0.15, 1.10],
+            PetState::Satisfied => [2.3, 0.15, 0.85],
+            PetState::Worried => [1.1, 0.85, -0.50],
+            PetState::Focused => [1.8, 0.08, 0.0],
+            PetState::Dozing => [0.8, 0.50, 0.0],
+            PetState::Sleeping => [0.7, 0.40, 0.0],
+            PetState::Music => [1.5, 0.35, 0.60],
+        };
+        for (slot, goal) in self.mouth.iter_mut().zip(mouth_goal) { *slot = approach(*slot, goal, 12.0, dt); }
+        // 眼睛灵敏度：鼠标移动时瞳孔跟随的快慢。
+        let speed = self.eye_speed.clamp(0.2, 3.0);
+        for (axis, goal) in self.gaze.iter_mut().zip(look) { *axis = approach(*axis, goal, 10.0 * speed, dt); }
         self.y = approach(self.y, y, 14.0, dt);
     }
 
@@ -230,6 +253,8 @@ impl Pet {
             // 圆端点保持胶囊眼睛的轮廓。
             for p in [points[0], points[12]] { c.circle(p.0, p.1, stroke/2.0, theme::WHITE); }
         }
+        // 嘴巴：唱歌时由 draw_music 单独画（吹口哨/张嘴），其余表情统一用下面的嘴巴。
+        if self.mouth_enabled && self.state != PetState::Music { self.draw_mouth(c, cx); }
         match self.state {
             PetState::Dozing | PetState::Sleeping => {
                 let bob = ((t as f32 * 1.4).sin() + 1.0) * 0.7;
@@ -260,10 +285,27 @@ impl Pet {
         }
     }
 
+    /// 非唱歌状态的嘴巴：张开度小时画成一条线，大时收成一个点/小口。
+    fn draw_mouth(&self, c: &Card, cx: f32) {
+        let y = 20.6 + self.y + self.gaze[1];
+        let [w, open, curve] = self.mouth;
+        if open < 0.22 {
+            // 一条线；curve>0 时中间下凹，呈微笑。
+            c.path(&[(cx - w, y), (cx - w * 0.35, y + curve), (cx + w * 0.35, y + curve), (cx + w, y)], 1.0, theme::WHITE);
+        } else {
+            let pts: Vec<(f32, f32)> = (0..=16).map(|n| {
+                let a = n as f32 / 16.0 * std::f32::consts::TAU;
+                (cx + a.cos() * w * 0.85, y + a.sin() * open)
+            }).collect();
+            c.path(&pts, 1.0, theme::WHITE);
+        }
+    }
+
     fn draw_music(&self,c:&Card,cx:f32,pose:MusicPose){
         let y=self.y+self.gaze[1];
         let pulse=(self.age*2.0).sin()*0.5+0.5;
         let mouth=|rx:f32,ry:f32|{
+            if !self.mouth_enabled { return; }
             let points:Vec<_>=(0..=24).map(|n|{let angle=n as f32/24.0*std::f32::consts::TAU;(cx-0.8+angle.cos()*rx,20.7+y+angle.sin()*ry)}).collect();
             c.path(&points,0.9,theme::WHITE);
         };
@@ -271,9 +313,9 @@ impl Pet {
             MusicPose::Microphone=>mouth(1.1,0.8+pulse*0.5),
             MusicPose::SideSing=>mouth(1.5,0.8+pulse*0.3),
             MusicPose::HighNote=>mouth(1.7,1.6+pulse*0.5),
-            MusicPose::Hum=>c.path(&[(cx-2.7,20.7+y),(cx-1.8,21.4+y),(cx-0.8,21.0+y),(cx+0.2,21.4+y),(cx+1.1,20.7+y)],0.9,theme::WHITE),
+            MusicPose::Hum=>{ if self.mouth_enabled { c.path(&[(cx-2.7,20.7+y),(cx-1.8,21.4+y),(cx-0.8,21.0+y),(cx+0.2,21.4+y),(cx+1.1,20.7+y)],0.9,theme::WHITE); } },
             MusicPose::Squint=>mouth(1.2,0.4+pulse*0.6),
-            MusicPose::Smile=>c.path(&[(cx-2.5,20.6+y),(cx-1.6,21.6+y),(cx-0.5,21.9+y),(cx+0.6,21.6+y),(cx+1.5,20.6+y)],1.0,theme::WHITE),
+            MusicPose::Smile=>{ if self.mouth_enabled { c.path(&[(cx-2.5,20.6+y),(cx-1.6,21.6+y),(cx-0.5,21.9+y),(cx+0.6,21.6+y),(cx+1.5,20.6+y)],1.0,theme::WHITE); } },
         }
         if matches!(pose,MusicPose::Microphone|MusicPose::SideSing|MusicPose::HighNote) {
             microphone(c,cx,y,self.age);

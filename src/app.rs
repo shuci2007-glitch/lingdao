@@ -2298,6 +2298,8 @@ impl App {
         self.pet.last_idle = idle;
         self.pet.hovered = env.cursor.is_some_and(|p| (p.x-cx).abs() <= BAR_W/2.0+24.0 && (0.0..70.0).contains(&p.y));
         self.pet.worried = self.settings.show_battery && env.battery.is_some_and(|v|v<=20) && !env.charging || env.network == Some(false);
+        self.pet.mouth_enabled = self.settings.pet_mouth;
+        self.pet.eye_speed = self.settings.pet_eye_speed;
         let allowed = self.pet_enabled();
         if !allowed { self.pet.reaction = None; self.pet.waking_until = 0.0; }
         let available = allowed && !self.open && !self.drag_hot;

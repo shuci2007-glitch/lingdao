@@ -1282,8 +1282,12 @@ impl App {
                             ui.separator();
 
                             let mut pet=self.settings.pet;
-                            setting_row(ui,"岛仔吉祥物","收起时常驻，播放音乐时一起唱歌",&mut pet);
+                            setting_row(ui,"灵岛吉祥物","收起时常驻，播放音乐时一起唱歌",&mut pet);
                             if pet!=self.settings.pet {self.set_pet(pet);}
+                            ui.separator();
+                            setting_row(ui,"灵岛嘴巴","随表情切换：一条线或收成一个点",&mut self.settings.pet_mouth);
+                            ui.separator();
+                            setting_number(ui,"眼睛灵敏度",&mut self.settings.pet_eye_speed,0.3,2.5," 倍",0.1);
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");
