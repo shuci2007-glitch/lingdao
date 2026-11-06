@@ -599,7 +599,14 @@ impl eframe::App for Shell {
         self.app.mail_reader_ui(ctx);
         #[cfg(windows)] let repaint_after=if self.hidden{Duration::from_secs(1)}else{out.repaint_after};
         #[cfg(not(windows))] let repaint_after=out.repaint_after;
-        schedule_repaint(ctx,repaint_after);
+        // 动画期间（repaint_after 落在 50ms 以内，即 60/30/20 帧档）改走连续帧（Poll），由
+        // vsync 锁帧；与「打开设置面板」被强制走的路径一致，杜绝 request_repaint_after 定时器
+        // 调度带来的帧间隔抖动。空闲（1 秒档）仍走定时节流，零开销。
+        if repaint_after <= Duration::from_millis(50) {
+            ctx.request_repaint();
+        } else {
+            schedule_repaint(ctx,repaint_after);
+        }
     }
 }
 
@@ -743,6 +750,9 @@ fn run() -> eframe::Result<()> {
         .with_taskbar(false)
         .with_always_on_top()
         .with_visible(false);
-    let opts = eframe::NativeOptions { viewport, vsync: !cfg!(windows), ..Default::default() };
+    // 开启垂直同步：动画期间改走连续帧（Poll，见下方 repaint 分支），由显示器刷新率均匀
+    // 驱动，既丝滑又不空转烧 CPU。Windows 上之前关掉 vsync 是为了避免无上限狂跑，但配合
+    // 连续帧 + 空闲定时节流后不再有这个问题。
+    let opts = eframe::NativeOptions { viewport, vsync: true, ..Default::default() };
     graphics::run(opts,|opts|eframe::run_native("岛仔", opts, Box::new(|cc| Ok(Box::new(Shell::new(cc))))))
 }

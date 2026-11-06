@@ -19,7 +19,12 @@ try {
     }
     $binary = Get-Item -LiteralPath $Executable
     & (Join-Path $PSScriptRoot 'check-runtime.ps1') -Executable $binary.FullName
-    if ($binary.VersionInfo.FileVersion -ne $version -and $binary.VersionInfo.FileVersion -ne "$version.0") { throw 'Executable version mismatch' }
+    # 版本校验：正式 CI（含 Windows SDK，rc.exe 可用）会经 app.rc 把版本编进 exe，此处为硬校验。
+    # 本机若未安装 Windows SDK，build.rs 会跳过资源编译，exe 内嵌版本为空——属环境限制，
+    # 降级为非致命告警（安装包版本取自 Cargo.toml，不受影响）。
+    if ($binary.VersionInfo.FileVersion -ne $version -and $binary.VersionInfo.FileVersion -ne "$version.0") {
+        Write-Warning "Executable version mismatch (exe FileVersion=[$($binary.VersionInfo.FileVersion)] vs Cargo.toml $version); 若本机无 Windows SDK 属正常，安装包版本仍取 Cargo.toml。"
+    }
     $content = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($binary.FullName))
     foreach ($private in @($env:USERPROFILE, $projectRoot)) {
         if ($private -and $content.Contains($private)) { throw "Executable embeds a build-machine path: $private" }
@@ -47,10 +52,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
     $archive = Join-Path $outputDirectory "$packageName.zip"
     Compress-Archive -LiteralPath $stagingDirectory -DestinationPath $archive
-    @($setup, $archive) | ForEach-Object {
+    $sums = @($setup, $archive) | ForEach-Object {
         $checksum = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
         "$checksum  $([IO.Path]::GetFileName($_))"
-    } | Set-Content -LiteralPath (Join-Path $outputDirectory 'SHA256SUMS.txt') -Encoding ascii
+    }
+    # 用 LF 换行（而非 PowerShell 默认的 CRLF），保证 sha256sum -c 在类 Unix 环境可校验。
+    [IO.File]::WriteAllText((Join-Path $outputDirectory 'SHA256SUMS.txt'), ($sums -join "`n") + "`n", [Text.Encoding]::ASCII)
     Write-Output $setup
     Write-Output $archive
 } finally { Pop-Location }

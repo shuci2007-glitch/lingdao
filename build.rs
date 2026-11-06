@@ -1,5 +1,9 @@
-//! 把岛仔图标作为 RT_GROUP_ICON #1 编进 exe，供 LoadImageW(hInst, 1, ...) 取用。
-//! 不引入额外依赖：直接调用 Windows SDK 的 rc.exe，把 .res 交给链接器。
+//! 把岛仔图标（RT_GROUP_ICON #1）与版本信息编进 exe，供 LoadImageW(hInst, 1, ...) 及
+//! 资源管理器属性页取用。
+//!
+//! 依赖 Windows SDK 的 rc.exe 编译 app.rc（app.rc 内含图标 + VERSIONINFO）。若环境无
+//! rc.exe（如本机未安装 Windows SDK），则跳过资源编译——此时 exe 不带图标/版本资源，
+//! 但程序功能不受影响。需在正式 CI（含 Windows SDK）中构建以获得完整资源。
 
 use std::env;
 use std::fs;
@@ -38,7 +42,7 @@ fn main() {
     }
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("daozai.res");
     let Some(rc) = find_rc() else {
-        println!("cargo:warning=rc.exe 未找到，跳过图标资源");
+        println!("cargo:warning=rc.exe 未找到（未安装 Windows SDK），跳过图标/版本资源编译；exe 将不带资源");
         return;
     };
     let status = Command::new(&rc)
@@ -47,9 +51,9 @@ fn main() {
         .arg(&out)
         .arg("app.rc")
         .status();
-    if !status.map(|s| s.success()).unwrap_or(false) {
-        println!("cargo:warning=rc.exe 编译 app.rc 失败");
-        return;
+    if status.map(|s| s.success()).unwrap_or(false) {
+        println!("cargo:rustc-link-arg={}", out.display());
+    } else {
+        println!("cargo:warning=rc.exe 编译 app.rc 失败，跳过资源编译");
     }
-    println!("cargo:rustc-link-arg={}", out.display());
 }
