@@ -12,7 +12,7 @@ use std::collections::HashMap;
 #[path="mail_fetch.rs"]
 mod fetch;
 
-pub const SERVICE: &str = "Daozai.Mail";
+pub const SERVICE: &str = "Lingdao.Mail";
 
 // ---------------------------------------------------------------- 邮箱类型
 
@@ -97,7 +97,7 @@ impl Provider {
             Provider::Mail163 | Provider::Mail126 => "1. 登录对应的网易邮箱网页版，点顶部「设置」→「POP3/SMTP/IMAP」。\n2. 确认「IMAP/SMTP 服务」已开启；首次开启时按提示完成验证。\n3. 在「授权密码管理」中点「新增授权密码」，完成验证后复制到下方。填写客户端授权码，不是邮箱登录密码。",
             Provider::Exmail => "1. 登录腾讯企业邮网页版，在「设置」→「收发信设置」检查 IMAP/SMTP 服务。\n2. 常见网页版在「设置」→「邮箱绑定」→「客户端专用密码」→「生成新密码」获取密码；启用安全登录后须使用专用密码。\n3. 企业版本和管理员策略可能不同。找不到入口或服务被禁用时，请让企业管理员确认客户端接入方式，不要照搬 QQ 邮箱的路径。",
             Provider::ICloud => "1. 登录 Apple 账户页面，进入「登录和安全」→「App 专用密码」。\n2. 选择「生成 App 专用密码」，按提示填写名称并完成验证；账户需已开启双重认证。\n3. 邮箱栏填写完整的 iCloud 邮箱地址，下方填写刚生成的 App 专用密码，不是 Apple 账户密码。",
-            Provider::Gmail => "1. 登录 Google 账户，进入「安全性与登录」→「您的 Google 账号登录选项」→「开启两步验证」，按提示完成设置。\n2. 打开下方「应用专用密码」页面，输入应用名称（例如：岛仔）并创建，复制生成的 16 位应用专用密码。\n3. 邮箱栏填完整 Gmail 地址，下方填应用专用密码，不是 Google 登录密码。若没有创建入口，请检查组织账号限制、高级保护或仅使用安全密钥的验证设置。",
+            Provider::Gmail => "1. 登录 Google 账户，进入「安全性与登录」→「您的 Google 账号登录选项」→「开启两步验证」，按提示完成设置。\n2. 打开下方「应用专用密码」页面，输入应用名称（例如：灵岛）并创建，复制生成的 16 位应用专用密码。\n3. 邮箱栏填完整 Gmail 地址，下方填应用专用密码，不是 Google 登录密码。若没有创建入口，请检查组织账号限制、高级保护或仅使用安全密钥的验证设置。",
         }
     }
 
@@ -1041,8 +1041,8 @@ mod service {
                 match event {
                     Event::Status{status,..}=>println!("worker_status={status:?}"),
                     Event::Mail{new,item}=>{
-                        println!("worker_mail new={new} test_message={}",item.subject.starts_with("岛仔"));
-                        if new && item.subject=="岛仔后台监听实测" {
+                        println!("worker_mail new={new} test_message={}",item.subject.starts_with("灵岛"));
+                        if new && item.subject=="灵岛后台监听实测" {
                             service.sync(&[],120);return;
                         }
                     },
@@ -1061,7 +1061,7 @@ mod service {
         let mut session=net::connect(&account,&password).unwrap();session.examine("INBOX").unwrap();
         let (tx,rx)=std::sync::mpsc::channel();recent(&mut session,&account,&tx).unwrap();
         let items=rx.try_iter().filter_map(|ev|if let Event::Mail{item,..}=ev{Some(item)}else{None}).collect::<Vec<_>>();
-        let invite=items.iter().find(|m|m.subject=="【岛仔测试】邮件日程邀请：收件箱合并验证").expect("测试邀请未到达");
+        let invite=items.iter().find(|m|m.subject=="【灵岛测试】邮件日程邀请：收件箱合并验证").expect("测试邀请未到达");
         assert_eq!(invite.meeting.as_ref().unwrap().uid,"daozai-mail-test-20261103-1500");
         let plain=items.iter().find(|m|m.subject=="DAOZAI-DATE-TEST-20261103").expect("普通日期邮件未到达");
         assert!(plain.meeting.is_none());session.logout().unwrap();
@@ -1087,7 +1087,7 @@ mod service {
         for event in &initial {if let Event::Mail{item,..}=event{
             println!("subject_chars={} sender_chars={} body_bytes={} links={} max_link_chars={}",item.subject.chars().count(),item.from.chars().count(),item.summary.len(),item.links.len(),item.links.iter().map(|l|l.label.chars().count()).max().unwrap_or(0));
         }}
-        let received=initial.iter().any(|e|matches!(e,Event::Mail{item,..} if item.subject=="岛仔收信测试"&&item.code.as_deref()==Some("482731")&&!item.links.is_empty()));
+        let received=initial.iter().any(|e|matches!(e,Event::Mail{item,..} if item.subject=="灵岛收信测试"&&item.code.as_deref()==Some("482731")&&!item.links.is_empty()));
         println!("test_message_with_code_and_link={received}");
         fetch_new(&mut session,account,&mut last,&tx).expect("增量收取失败");
         let added=rx.try_iter().count();

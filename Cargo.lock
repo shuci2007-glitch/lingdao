@@ -477,36 +477,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "daozai"
-version = "0.6.64"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "chrono-tz",
- "clipboard-win",
- "eframe",
- "egui_extras",
- "flate2",
- "image",
- "imap",
- "imap-proto",
- "keyring",
- "mailparse",
- "memmap2",
- "native-tls",
- "raw-window-handle",
- "regex",
- "ring",
- "rrule",
- "serde",
- "serde_json",
- "ureq",
- "url",
- "wgpu",
- "windows",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1485,6 +1455,36 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.9.5",
+]
+
+[[package]]
+name = "lingdao"
+version = "0.6.65"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "clipboard-win",
+ "eframe",
+ "egui_extras",
+ "flate2",
+ "image",
+ "imap",
+ "imap-proto",
+ "keyring",
+ "mailparse",
+ "memmap2",
+ "native-tls",
+ "raw-window-handle",
+ "regex",
+ "ring",
+ "rrule",
+ "serde",
+ "serde_json",
+ "ureq",
+ "url",
+ "wgpu",
+ "windows",
 ]
 
 [[package]]

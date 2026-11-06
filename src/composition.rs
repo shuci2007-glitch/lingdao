@@ -1,13 +1,13 @@
 //! 毛玻璃皮肤的实时背景模糊：Windows 合成引擎（Windows.UI.Composition）。
 //!
 //! 早先用的 `SetWindowCompositionAttribute` 模糊总是铺满整个窗口矩形、不认窗口区域，
-//! 而岛仔窗口是一大块透明画布，于是桌面顶部出现一整块深色方块。
+//! 而灵岛窗口是一大块透明画布，于是桌面顶部出现一整块深色方块。
 //!
 //! 现在的做法：单独建一个只承载合成视觉的「模糊底板」窗口（无重定向位图、不接收鼠标、
-//! 不出现在任务栏），与岛仔窗口同位置同大小，并始终紧贴在它**正下方**。底板上的每块视觉
+//! 不出现在任务栏），与灵岛窗口同位置同大小，并始终紧贴在它**正下方**。底板上的每块视觉
 //! 都用宿主背景画刷（Windows 11 亚克力用的系统实时模糊），主体按圆角裁剪，顶部外翻的
 //! 肩部按物理像素逐行拼出，模糊因此严格贴合岛体轮廓；岛体的着色、高光与文字仍由 egui
-//! 画在上层的岛仔窗口里。（直接挂在岛仔窗口上时，部分显卡会把视觉层叠到内容之上。）
+//! 画在上层的灵岛窗口里。（直接挂在灵岛窗口上时，部分显卡会把视觉层叠到内容之上。）
 
 use crate::app::BlurPiece;
 use windows::core::Interface;
@@ -34,7 +34,7 @@ fn create_backdrop_window() -> windows::core::Result<HWND> {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     static CLASS: std::sync::Once = std::sync::Once::new();
     let instance = unsafe { GetModuleHandleW(None)? };
-    let class = windows::core::w!("DaozaiGlassBackdrop");
+    let class = windows::core::w!("LingdaoGlassBackdrop");
     CLASS.call_once(|| unsafe {
         let wc = WNDCLASSW { lpfnWndProc: Some(backdrop_proc), hInstance: instance.into(), lpszClassName: class, ..Default::default() };
         RegisterClassW(&wc);
@@ -52,9 +52,9 @@ fn create_backdrop_window() -> windows::core::Result<HWND> {
     }
 }
 
-/// 把底板窗口裁成模糊块的并集。底板和岛仔画布一样大，而 `HTTRANSPARENT`
+/// 把底板窗口裁成模糊块的并集。底板和灵岛画布一样大，而 `HTTRANSPARENT`
 /// 只把点击让给同一线程的窗口：不裁剪时，画布范围内（含岛右侧和下方大片空白）
-/// 其他程序的标题栏按钮等都会点不动，直到退出岛仔。
+/// 其他程序的标题栏按钮等都会点不动，直到退出灵岛。
 fn clip_to_pieces(hwnd: HWND, pieces: &[BlurPiece]) {
     use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
     unsafe {
@@ -121,7 +121,7 @@ impl Backdrop {
         Ok(Self { hwnd, placed: (RECT::default(), false), _queue: queue, compositor, _target: target, root, children, brush, pool: Vec::new(), shown: Vec::new(), visible: false })
     }
 
-    /// 让底板与岛仔窗口重合，并紧贴在它正下方。
+    /// 让底板与灵岛窗口重合，并紧贴在它正下方。
     fn follow(&mut self, island: HWND) {
         unsafe {
             let mut rect = RECT::default();
@@ -134,7 +134,7 @@ impl Backdrop {
         }
     }
 
-    /// 显示并更新模糊块（物理像素，岛仔窗口坐标）。形状不变时不提交任何改动。
+    /// 显示并更新模糊块（物理像素，灵岛窗口坐标）。形状不变时不提交任何改动。
     pub fn show(&mut self, island: HWND, pieces: &[BlurPiece]) -> windows::core::Result<()> {
         self.follow(island);
         if pieces != self.shown.as_slice() {

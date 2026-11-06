@@ -39,7 +39,7 @@ pub fn parse(v:&Value)->Result<Snapshot,String>{
     Ok(Snapshot{wallet:Some(Wallet{available,balances}),at:chrono::Utc::now().timestamp(),..Default::default()})
 }
 #[cfg(windows)]
-fn credential(slot:&str)->Result<keyring::Entry,String>{keyring::Entry::new("Daozai.DeepSeek",slot).map_err(|_|"无法打开 Windows 凭据管理器".into())}
+fn credential(slot:&str)->Result<keyring::Entry,String>{keyring::Entry::new("Lingdao.DeepSeek",slot).map_err(|_|"无法打开 Windows 凭据管理器".into())}
 #[cfg(windows)]
 fn save(slot:&str,key:&str)->Result<(),String>{credential(slot)?.set_password(key).map_err(|_|"无法安全保存 API Key".into())}
 #[cfg(not(windows))]

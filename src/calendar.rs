@@ -13,7 +13,7 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use chrono::{Datelike, NaiveDate};
 
-pub const SERVICE: &str = "Daozai.Calendar";
+pub const SERVICE: &str = "Lingdao.Calendar";
 /// 开启自动同步时每 5 分钟更新一次。
 const SYNC_SECS: u64 = 300;
 /// 只取未来 24 小时。
@@ -105,13 +105,13 @@ impl Provider {
             ],
             Provider::ICloud => [
                 "用浏览器打开 account.apple.com，登录 Apple 账户",
-                "登录与安全 → App 专用密码 → 生成一个（名称可填「岛仔」）",
+                "登录与安全 → App 专用密码 → 生成一个（名称可填「灵岛」）",
                 "用户名填 Apple ID 邮箱，密码填刚生成的 App 专用密码",
             ],
             Provider::Custom => [
                 "服务器填日历服务的 CalDAV 地址，例如 https://example.com/remote.php/dav",
                 "用户名和密码用该服务的账号；支持「应用密码」的建议单独生成一个",
-                "只读同步；岛仔会自动发现账号下所有日历",
+                "只读同步；灵岛会自动发现账号下所有日历",
             ],
             Provider::Exchange => [
                 "服务器填 Exchange 邮件服务器地址，例如 mail.example.com，可向公司 IT 获取",
@@ -441,7 +441,7 @@ fn agent() -> ureq::Agent {
         .timeout_write(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
         .redirects(0)
-        .user_agent(concat!("Daozai/",env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Lingdao/",env!("CARGO_PKG_VERSION")))
         .build()
 }
 
@@ -1409,7 +1409,7 @@ mod tests {
     fn live_calendar_test_samples() {
         let cfg=load_config().unwrap();let password=secrets::load(&cfg).unwrap();
         let month=fetch_month(&cfg,&password,NaiveDate::from_ymd_opt(2026,11,3).unwrap()).unwrap();
-        let samples=month.events.iter().filter(|m|m.title.starts_with("【岛仔测试】")).collect::<Vec<_>>();
+        let samples=month.events.iter().filter(|m|m.title.starts_with("【灵岛测试】")).collect::<Vec<_>>();
         let repeated=samples.iter().filter(|m|m.title.contains("重复与取消验证")).collect::<Vec<_>>();
         assert_eq!(repeated.len(),2);
         assert_eq!(repeated.iter().map(|m|chrono::DateTime::from_timestamp(m.start,0).unwrap().with_timezone(&chrono::Local).day()).collect::<Vec<_>>(),vec![3,5]);

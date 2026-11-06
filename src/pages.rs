@@ -835,7 +835,8 @@ impl App {
     // 邮件：有验证码大卡时分栏，否则显示紧凑单行列表。
     // ---------------------------------------------------------------
     fn visible_mail_code(&self)->Option<&mail::Item> {
-        self.mail.code_item().filter(|item|self.settings.mail_code && !self.mail_code_hidden(item))
+        // 隐藏只是把数字遮成圆点，卡片要保留（点一下即可显示），不能整卡消失。
+        self.mail.code_item().filter(|_|self.settings.mail_code)
     }
     pub(crate) fn mail_list_bounds(&self)->Rect {
         let left=if self.visible_mail_code().is_some(){182.0}else{36.0};
@@ -900,6 +901,7 @@ impl App {
         content.spacing_mut().scroll.floating=false;
         content.spacing_mut().scroll.bar_width=4.0*c.s;
         content.visuals_mut().widgets.inactive.bg_fill=Color32::from_gray(80);
+        let mut dismiss: Option<(String,u32)> = None;
         egui::ScrollArea::vertical().id_salt("mail-list-scroll").max_height(list_bounds.height()*c.s).auto_shrink([false,false]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show_rows(&mut content,row_h*c.s,self.mail.recent.len(),|ui,range|{
             let rows:Vec<_>=self.mail.recent[range].iter().map(|item|(self.mail_code_hidden(item),self.display_mail(item))).collect();
             for (hidden,item) in &rows {
@@ -917,17 +919,37 @@ impl App {
                         row.fill(78.0+width,5.0,30.0,12.0,3.0,theme::BTN);
                         row.text(93.0+width,14.0,"已隐藏",8.5,W::Regular,theme::GRAY,H::Center);
                     }
-                    row.text(row_w-6.0,14.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
+                    row.text(row_w-26.0,14.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
                     row.seg((6.0,row_h-0.5),(row_w-6.0,row_h-0.5),0.5,Color32::from_gray(40));
                 } else {
                 row.text(6.0,12.0,&row.fit(&item.from,11.5,W::Semibold,row_w-54.0),11.5,W::Semibold,theme::WHITE,H::Left);
-                row.text(row_w-6.0,12.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
+                row.text(row_w-26.0,12.0,item.time.rsplit(' ').next().unwrap_or(&item.time),10.0,W::Regular,Color32::from_gray(170),H::Right);
                 row.text(6.0,27.0,&row.fit(&item.subject,10.5,W::Regular,row_w-12.0),10.5,W::Regular,Color32::from_gray(200),H::Left);
                 }
                 hit.clone().on_hover_text(format!("{}\n{}\n收件邮箱：{}\n{}",item.from,item.subject,item.account,item.time));
                 if hit.clicked(){self.mail.open_uid=Some((item.account.clone(),item.uid));}
+                // 每行右侧的删除键：单击只删这一封（不删服务器邮件）。
+                let del=row.hit(row_w-22.0,3.0,20.0,row_h-6.0,("mail-del",item.uid,item.account.as_str()))
+                    .on_hover_text("从列表里删除这封邮件（不会删除服务器上的邮件）");
+                let tint=if del.hovered(){theme::WHITE}else{Color32::from_gray(130)};
+                row.path(&[(row_w-18.0,row_h*0.33),(row_w-8.0,row_h*0.67)],1.2,tint);
+                row.path(&[(row_w-8.0,row_h*0.33),(row_w-18.0,row_h*0.67)],1.2,tint);
+                if del.clicked(){dismiss=Some((item.account.clone(),item.uid));}
             }
         });
+        if let Some((account,uid))=dismiss {
+            self.mail.dismiss(&account,uid);
+            crate::model::save_dismissed(&self.mail.dismissed);
+        }
+        // 底部：数量 + 一键清空（只清本地列表与缓存，不动邮箱服务器）。
+        let total=self.mail.recent.len();
+        c.text(list_x,126.0,&format!("共 {total} 封"),9.5,W::Regular,theme::DIM,H::Left);
+        let clear=c.hit(340.0,119.0,44.0,18.0,"mail-clear");
+        c.text(380.0,126.0,"清空",9.5,W::Regular,if clear.hovered(){theme::WHITE}else{Color32::from_gray(150)},H::Right);
+        if clear.clicked(){
+            self.mail.clear();
+            self.mail.privacy=Default::default();
+        }
     }
 
     /// 岛内邮件详情可滚动，也可以进入独立窗口阅读全文。

@@ -1,4 +1,4 @@
-//! 默认浏览器登录：官网生成一次性请求，岛仔轮询对应的授权结果。
+//! 默认浏览器登录：官网生成一次性请求，灵岛轮询对应的授权结果。
 use super::{Auth,Session,Snapshot,Failure,slot,query,save_session};
 use serde_json::Value;
 use std::io::Read;

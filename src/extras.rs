@@ -1,4 +1,4 @@
-//! 设置、通知队列与岛仔表情。
+//! 设置、通知队列与灵岛表情。
 use crate::settings_theme::color as settings_color;
 use crate::app::{App, Cmd, Phase, HUD_TRACK_W, HUD_TRACK_X, HUD_W, PAGE_NAMES};
 use crate::paint::{Card, H};
@@ -295,7 +295,7 @@ impl App {
     }
     pub fn receive_notification(&mut self, app:String, id:String, body:String){
         if !self.settings.read_notifications || id.is_empty() || (self.settings.qq_only && id!="QQ"){return;}
-        // 岛仔自己发出的系统提醒会被通知中心回传；已在历史里的同一内容不再入队，避免重复显示。
+        // 灵岛自己发出的系统提醒会被通知中心回传；已在历史里的同一内容不再入队，避免重复显示。
         if self.history.iter().any(|a|format!("{} · {}",a.title,a.body)==body){return;}
         if !self.notification_apps.observe(&id,&app) || !self.settings.notifications{return;}
         if id=="QQ"{self.mark_messenger(crate::app::Messenger::Qq,0,0);}
@@ -811,7 +811,7 @@ impl App {
             0=>{
                 let choices=[("吉祥物",self.settings.pet),("极简刘海",self.settings.minimal),("系统提示",self.settings.system_hud),("全屏隐藏",self.settings.hide_fullscreen)];
                 for (i,(name,on)) in choices.iter().enumerate(){let x=42.0+(i%2) as f32*169.0;let y=57.0+(i/2) as f32*27.0;let text=format!("{}  {}",name,if *on{"开"}else{"关"});if setting_button(c,x,y,158.0,&text,*on,&format!("general-{i}")){match i{0=>self.set_pet(!self.settings.pet),1=>self.set_minimal(!self.settings.minimal),2=>self.settings.system_hud=!self.settings.system_hud,_=>self.settings.hide_fullscreen=!self.settings.hide_fullscreen}}}
-                c.text(42.0,116.0,"岛仔收起时常驻；极简模式保留细线",10.5,W::Regular,theme::GRAY,H::Left);
+                c.text(42.0,116.0,"灵岛收起时常驻；极简模式保留细线",10.5,W::Regular,theme::GRAY,H::Left);
             }
             1=>{
                 let rows=[("每次",format!("{} ml",self.settings.serving_ml)),("间隔",format!("{} 分",self.settings.water_minutes)),("目标",format!("{:.1} L",self.water.goal_ml as f32/1000.0))];
@@ -950,9 +950,9 @@ fn support_author(ui:&mut egui::Ui){
             });
         });
     ui.add_space(9.0);
-    ui.label(egui::RichText::new("小唐维护 · 岛仔陪伴").size(10.5).color(accent));
+    ui.label(egui::RichText::new("小唐维护 · 灵岛陪伴").size(10.5).color(accent));
     ui.label(egui::RichText::new("请小唐喝杯咖啡").size(19.0).strong());
-    ui.label("岛仔陪你认真生活，\n你的支持，陪小唐把它慢慢做好。");
+    ui.label("灵岛陪你认真生活，\n你的支持，陪小唐把它慢慢做好。");
     } else {
         let ctx=ui.ctx().clone();
         // 只解码一次并裁出二维码区域，按实际显示像素缩小：原图解码后两张合计约 17MB，缩小后不到 1MB。
@@ -1045,7 +1045,7 @@ impl App {
         if !self.settings_open{return;}
         let id=egui::ViewportId::from_hash_of("daozai-settings");
         let focus_requested=std::mem::take(&mut self.settings_focus_requested);
-        ctx.show_viewport_immediate(id,egui::ViewportBuilder::default().with_title("岛仔设置").with_icon(theme::app_icon()).with_inner_size([690.0,560.0]).with_min_inner_size([600.0,450.0]).with_visible(false).with_active(false).with_window_level(egui::WindowLevel::Normal),|ctx,_|{
+        ctx.show_viewport_immediate(id,egui::ViewportBuilder::default().with_title("灵岛设置").with_icon(theme::app_icon()).with_inner_size([690.0,560.0]).with_min_inner_size([600.0,450.0]).with_visible(false).with_active(false).with_window_level(egui::WindowLevel::Normal),|ctx,_|{
             let dark=self.settings.settings_theme.dark(crate::settings_theme::system_dark(ctx));
             let original_style=ctx.style();
             let mut style=(*original_style).clone();
@@ -1202,7 +1202,7 @@ impl App {
                         settings_label(ui,"启动");
                         settings_card(ui,|ui|{
                             let mut a=autostart;
-                            setting_row(ui,"开机启动","登录 Windows 时自动打开岛仔",&mut a);
+                            setting_row(ui,"开机启动","登录 Windows 时自动打开灵岛",&mut a);
                             if a!=autostart{self.pending.push(Cmd::ToggleAutostart);}
                         });
                         settings_label(ui,"岛体外观");
@@ -1398,7 +1398,7 @@ impl App {
                             ui.separator();
                             setting_row(ui,"蓝牙通知","设备连接与断开提醒；关闭后停止蓝牙监听",&mut self.settings.bluetooth_notifications);
                             ui.separator();
-                            setting_row(ui,"岛仔提醒","在岛上显示饮水、专注和待办提醒",&mut self.settings.notifications);
+                            setting_row(ui,"灵岛提醒","在岛上显示饮水、专注和待办提醒",&mut self.settings.notifications);
                         });
                         settings_label(ui,"微信提醒");
                         settings_card(ui,|ui|{
@@ -1436,8 +1436,11 @@ impl App {
                             ui.separator();
                             setting_row(ui,"验证码高亮","识别到验证码时在岛上放大显示，点击即复制",&mut self.settings.mail_code);
                             ui.separator();
-                            setting_choices(ui,"验证码隐藏",&mut self.settings.mail_code_hide_seconds,[30,60,300],"秒");
-                            ui.label("默认 60 秒。明确有效时长更短时提前隐藏；历史邮件默认隐藏。隐藏不代表失效，主动查看后 15 秒再次隐藏。");
+                            setting_row(ui,"验证码自动隐藏","显示满设定时长后遮罩成圆点，点一下可临时查看；关掉则一直直显",&mut self.settings.mail_code_hide);
+                            if self.settings.mail_code_hide {
+                                setting_choices(ui,"验证码隐藏",&mut self.settings.mail_code_hide_seconds,[30,60,300],"秒");
+                                ui.label("默认 60 秒。明确有效时长更短时提前隐藏；历史邮件默认隐藏。隐藏不代表失效，主动查看后 15 秒再次隐藏。");
+                            }
                             setting_choices(ui,"检查间隔",&mut self.settings.mail_interval,[60,120,300],"秒");
                             ui.label(egui::RichText::new("支持推送时实时收信，并每 10 秒补查；以上间隔仅用于不支持推送的邮箱。").size(11.5).color(settings_color(ctx,Color32::from_gray(195),Color32::from_gray(60))));
                             ui.separator();
@@ -1708,7 +1711,7 @@ impl App {
                         });
                     }
                     _=>{
-                        settings_label(ui,"岛仔 Daozai");
+                        settings_label(ui,"灵岛 Lingdao");
                         settings_card(ui,|ui|{
                             ui.horizontal(|ui|{
                                 ui.label(egui::RichText::new(format!("版本 {}",env!("CARGO_PKG_VERSION"))).size(13.0));

@@ -1,11 +1,11 @@
 ﻿//! 持久化与状态模型。
 //!
 //! 文件布局与原工具同名同结构（原工具字符串中可见的路径与键名），但默认目录
-//! 用独立的 `%APPDATA%\Daozai`，避免与原工具的 `%APPDATA%\Nusa` 互相覆盖：
-//!   %APPDATA%\Daozai\settings.txt   -> pet=0/1, minimal=0/1
-//!   %APPDATA%\Daozai\todo.txt
-//!   %APPDATA%\Daozai\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
-//!   %APPDATA%\Daozai\shelf.txt      -> 置物清单（每行一个绝对路径）
+//! 用独立的 `%APPDATA%\Lingdao`，避免与原工具的 `%APPDATA%\Nusa` 互相覆盖：
+//!   %APPDATA%\Lingdao\settings.txt   -> pet=0/1, minimal=0/1
+//!   %APPDATA%\Lingdao\todo.txt
+//!   %APPDATA%\Lingdao\water.txt      -> bottle=<ml> / goal=<ml> / start=YYYY-MM-DD
+//!   %APPDATA%\Lingdao\shelf.txt      -> 置物清单（每行一个绝对路径）
 //!
 //! 设置环境变量 `DAOZAI_DATA_DIR` 可把以上目录整体改到别处（用于与已安装的
 //! 原工具并存、或跑测试时不碰真实数据）。
@@ -21,7 +21,7 @@ pub fn config_dir() -> PathBuf {
     if let Ok(root) = std::env::var("DAOZAI_DATA_DIR") {
         return PathBuf::from(root);
     }
-    env_dir("APPDATA").join("Daozai")
+    env_dir("APPDATA").join("Lingdao")
 }
 
 fn read_kv(path: &Path) -> Vec<(String, String)> {
@@ -66,6 +66,47 @@ pub(crate) fn atomic_write(path:&Path,body:&[u8])->std::io::Result<()> {
     let result=result.and_then(|_|replace_file(&tmp,path));
     if result.is_err(){let _=fs::remove_file(&tmp);}
     result
+}
+
+/// 已忽略（本地删除）的邮件 uid，按账号小写聚合，避免重启后再次从服务器拉回。
+pub fn load_dismissed() -> std::collections::HashMap<String, std::collections::HashSet<u32>> {
+    use std::collections::{HashMap, HashSet};
+    let mut map: HashMap<String, HashSet<u32>> = HashMap::new();
+    if let Ok(text) = fs::read_to_string(config_dir().join("mail_dismissed.txt")) {
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            // 新格式：每行一个 JSON 数组 [account, uid]，账号含 ':' / 换行也不会破坏格式。
+            if line.starts_with('[') {
+                if let Ok((account, uid)) = serde_json::from_str::<(String, u32)>(line) {
+                    if !account.is_empty() { map.entry(account.to_ascii_lowercase()).or_default().insert(uid); }
+                }
+                continue;
+            }
+            // 旧格式明文 account:uid 继续兼容读取。
+            if let Some((account, uid)) = line.split_once(':') {
+                if let Ok(uid) = uid.trim().parse::<u32>() {
+                    let account = account.trim();
+                    if !account.is_empty() { map.entry(account.to_ascii_lowercase()).or_default().insert(uid); }
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 把已忽略的邮件 uid 落盘（尽力而为，写失败不影响内存状态）。
+pub fn save_dismissed(dismissed: &std::collections::HashMap<String, std::collections::HashSet<u32>>) {
+    let mut lines: Vec<String> = Vec::new();
+    for (account, uids) in dismissed {
+        for uid in uids {
+            if let Ok(row) = serde_json::to_string(&(account.as_str(), *uid)) {
+                lines.push(row);
+            }
+        }
+    }
+    lines.sort();
+    let _ = atomic_write(&config_dir().join("mail_dismissed.txt"), lines.join("\n").as_bytes());
 }
 
 fn replace_file(tmp:&Path,path:&Path)->std::io::Result<()> {
@@ -256,6 +297,8 @@ pub struct Settings {
     /// v0.5.5 邮件提醒：总开关、验证码高亮、轮询间隔（秒）、会议提前量（分钟）。
     pub mail_enabled: bool,
     pub mail_code: bool,
+    /// 验证码显示满设定时长后是否自动遮罩（用户可关，关掉后一直直显）。
+    pub mail_code_hide: bool,
     pub mail_code_hide_seconds:u32,
     pub mail_interval: u32,
     pub mail_ics: u32,
@@ -270,7 +313,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: false, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
     }
 }
 
@@ -383,6 +426,7 @@ impl Settings {
                 "water_end" => s.water_end = v.parse::<u32>().unwrap_or(22).min(24),
                 "mail_enabled" => s.mail_enabled = v != "0",
                 "mail_code" => s.mail_code = v != "0",
+                "mail_code_hide" => s.mail_code_hide = v != "0",
                 "mail_code_hide_seconds" => s.mail_code_hide_seconds=v.parse::<u32>().unwrap_or(60).clamp(15,300),
                 "mail_interval" => s.mail_interval = match v.parse::<u32>().unwrap_or(120) { 60 => 60, 300 => 300, _ => 120 },
                 "ignored_mail_events" => s.ignored_mail_events = serde_json::from_str(&v).unwrap_or_default(),
@@ -445,6 +489,7 @@ impl Settings {
                 ("water_end".into(), self.water_end.to_string()),
                 ("mail_enabled".into(), (self.mail_enabled as u8).to_string()),
                 ("mail_code".into(), (self.mail_code as u8).to_string()),
+                ("mail_code_hide".into(), (self.mail_code_hide as u8).to_string()),
                 ("mail_code_hide_seconds".into(), self.mail_code_hide_seconds.to_string()),
                 ("mail_interval".into(), self.mail_interval.to_string()),
                 ("mail_ics".into(), self.mail_ics.to_string()),

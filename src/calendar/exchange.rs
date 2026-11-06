@@ -1,5 +1,5 @@
 //! Exchange ActiveSync 14.0（企业微信、自建或第三方 Exchange）：只读取日历，不发送日程修改命令。
-//! 服务器要求设备策略时只如实回报「部分执行」：岛仔不执行锁屏密码、远程擦除等管控。
+//! 服务器要求设备策略时只如实回报「部分执行」：灵岛不执行锁屏密码、远程擦除等管控。
 use super::{Config, Failure, Fetched, Provider};
 use chrono::{DateTime, Utc};
 use std::io::Read;
@@ -112,7 +112,7 @@ impl<'a> Session<'a> {
     fn provision(&mut self) -> Result<(), Failure> {
         self.provisioned = true;
         let label = self.cfg.provider.label();
-        let refused = || Failure::text(format!("{label}要求设备满足安全策略（如锁屏密码、远程擦除），岛仔不执行这些管控；请联系管理员允许不受管控的设备"));
+        let refused = || Failure::text(format!("{label}要求设备满足安全策略（如锁屏密码、远程擦除），灵岛不执行这些管控；请联系管理员允许不受管控的设备"));
         let first = command(&self.agent, self.cfg, self.password, "Provision", &provision_request(None), None)?;
         // 服务器下发远程擦除时绝不执行，直接停止同步。
         if first.child(PROVISION, 0x0c).is_some() { return Err(refused()); }
@@ -127,7 +127,7 @@ impl<'a> Session<'a> {
     }
 }
 
-/// 设备策略请求。确认时如实回报「部分执行」（2）：岛仔只读日历，不执行任何设备管控。
+/// 设备策略请求。确认时如实回报「部分执行」（2）：灵岛只读日历，不执行任何设备管控。
 fn provision_request(acknowledge: Option<&str>) -> Node {
     let mut policy = vec![node(PROVISION, 8, "MS-EAS-Provisioning-WBXML", vec![])];
     if let Some(key) = acknowledge { policy.extend([node(PROVISION, 9, key, vec![]), node(PROVISION, 0x0b, "2", vec![])]); }
@@ -142,7 +142,7 @@ fn top_status(n: &Node) -> &str {
 fn command(agent: &ureq::Agent, cfg: &Config, password: &str, name: &str, root: &Node, policy: Option<&str>) -> Result<Node, Failure> {
     let mut target = endpoint(cfg)?;
     // 固定匿名设备标识，完整快照按顺序读取，不保存同步键或日程正文。
-    target.query_pairs_mut().extend_pairs([("Cmd", name), ("User", cfg.username.as_str()), ("DeviceId", "DaozaiCalendar01"), ("DeviceType", "Daozai")]);
+    target.query_pairs_mut().extend_pairs([("Cmd", name), ("User", cfg.username.as_str()), ("DeviceId", "LingdaoCalendar01"), ("DeviceType", "Lingdao")]);
     let mut request = agent.post(target.as_str())
         .set("Authorization", &super::basic_auth(&cfg.username, password))
         .set("MS-ASProtocolVersion", "14.0")
@@ -161,7 +161,7 @@ fn command(agent: &ureq::Agent, cfg: &Config, password: &str, name: &str, root: 
 fn check_status(n: &Node, page: u8, tag: u8, label: &str) -> Result<(), Failure> {
     match n.required(page, tag)? {
         "1" => Ok(()),
-        code if NEEDS_PROVISION.contains(&code) => Err(Failure::text(format!("{label}要求设备满足安全策略，岛仔不执行这些管控；请联系管理员允许不受管控的设备"))),
+        code if NEEDS_PROVISION.contains(&code) => Err(Failure::text(format!("{label}要求设备满足安全策略，灵岛不执行这些管控；请联系管理员允许不受管控的设备"))),
         code => Err(Failure::text(format!("{label}同步失败（Exchange {code}），请检查日历授权后重试"))),
     }
 }

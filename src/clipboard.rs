@@ -155,7 +155,7 @@ pub fn watch(shared: Shared, repaint: impl Fn() + Send + 'static) {
 pub fn watch(_shared: Shared, _repaint: impl Fn() + Send + 'static) {}
 
 #[cfg(windows)]
-const HISTORY_COPY_FORMAT: &str = "Daozai.ClipboardHistoryCopy";
+const HISTORY_COPY_FORMAT: &str = "Lingdao.ClipboardHistoryCopy";
 
 #[cfg(windows)]
 pub fn copy_history(text: &str) -> bool {
@@ -248,7 +248,7 @@ mod win {
     pub fn run(shared: Shared, repaint: Box<dyn Fn() + Send>) -> windows::core::Result<()> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
-            let class = w!("DaozaiClipboardWatcher");
+            let class = w!("LingdaoClipboardWatcher");
             let wc = WNDCLASSW { lpfnWndProc: Some(proc), hInstance: instance.into(), lpszClassName: class, ..Default::default() };
             RegisterClassW(&wc);
             let hwnd = CreateWindowExW(WINDOW_EX_STYLE(0), class, PCWSTR::null(), WINDOW_STYLE(0), 0, 0, 0, 0, HWND_MESSAGE, None, instance, None)?;

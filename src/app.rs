@@ -103,7 +103,7 @@ pub struct Env {
     /// 光标位置（与 `frame` 传入的 `win` 同一坐标系）；不在窗口附近时为 None。
     pub cursor: Option<Pos2>,
     pub idle_seconds: Option<f64>,
-    /// 前台浏览器的顶部是否与岛重叠；岛仔自身窗口或暂不可读时为 None。
+    /// 前台浏览器的顶部是否与岛重叠；灵岛自身窗口或暂不可读时为 None。
     pub browser_at_top: Option<bool>,
     pub media: NowPlaying,
     /// 系统主音量（0..100, 是否静音）；v0.5.4 音量条与系统双向同步。
@@ -477,6 +477,9 @@ pub(crate) struct MailState {
     pub reader_focus: bool,
     /// 已经提醒过的会议，键是 `UID + DTSTART`（邮件和日历两条来源共用）。
     pub fired: std::collections::HashSet<String>,
+    /// 用户在本机已忽略（删除）的邮件 uid，按账号小写聚合。
+    /// 仅本地生效、不删服务器邮件；落盘后即使重启也不会再从服务器拉回。
+    pub dismissed: std::collections::HashMap<String, std::collections::HashSet<u32>>,
 }
 
 #[derive(Default)]
@@ -496,6 +499,25 @@ impl MailState {
             .get(&email.to_ascii_lowercase())
             .cloned()
             .unwrap_or(mail::Status::Idle)
+    }
+    /// 从岛内列表删掉一封邮件：只动本地列表，不删服务器上的邮件。
+    /// 同时记入 `dismissed`，下次启动从服务器拉回时也会被跳过，不会「删除后复活」。
+    pub fn dismiss(&mut self, account: &str, uid: u32) {
+        let key = account.to_ascii_lowercase();
+        self.dismissed.entry(key).or_default().insert(uid);
+        self.recent.retain(|m| m.uid != uid || !m.account.eq_ignore_ascii_case(account));
+        if self.open_uid.as_ref().is_some_and(|(a, u)| *u == uid && a.eq_ignore_ascii_case(account)) {
+            self.open_uid = None;
+        }
+        if self.reading.as_ref().is_some_and(|m| m.uid == uid && m.account.eq_ignore_ascii_case(account)) {
+            self.reading = None;
+        }
+    }
+    /// 清空岛内列表（含已打开的详情），服务器上的邮件不受影响。
+    pub fn clear(&mut self) {
+        self.recent.clear();
+        self.open_uid = None;
+        self.reading = None;
     }
 }
 
@@ -820,7 +842,7 @@ impl App {
             volume_a: 0.0,
             bt_shown: Vec::new(),
             bt_initialized: false,
-            mail: MailState { accounts: mail::load_accounts(), ..Default::default() },
+            mail: MailState { accounts: mail::load_accounts(), dismissed: crate::model::load_dismissed(), ..Default::default() },
             calendar: CalendarState::load(),
             quota: crate::quota_ui::State::load(),
             updates: Default::default(),
@@ -839,7 +861,8 @@ impl App {
     }
 
     pub(crate) fn mail_code_hidden(&self,item:&mail::Item)->bool {
-        self.mail.privacy.hidden(item,self.t,self.settings.mail_code_hide_seconds)
+        // 用户可关掉自动隐藏：关掉后验证码一直直显，不再遮成圆点。
+        self.settings.mail_code_hide && self.mail.privacy.hidden(item,self.t,self.settings.mail_code_hide_seconds)
     }
     pub(crate) fn reveal_mail_code(&mut self,item:&mail::Item){self.mail.privacy.reveal(item,self.t);}
     pub(crate) fn display_mail(&self,item:&mail::Item)->mail::Item {
@@ -867,6 +890,8 @@ impl App {
             }
             mail::Event::Mail { item, new } => {
                 if !watching(&item.account){return;}
+                // 用户本机删过的邮件：重启后再从服务器拉回也跳过，避免「删除后复活」。
+                if self.mail.dismissed.get(&item.account.to_ascii_lowercase()).is_some_and(|s| s.contains(&item.uid)) { return; }
                 self.mail.privacy.observe(&item,new,self.t,chrono::Utc::now().timestamp());
                 self.mail
                     .recent
@@ -2554,7 +2579,7 @@ impl App {
             4 => ("待办", "清单", theme::GREEN),
             5 => ("邮箱", "", theme::CYAN),
             6 => ("AI", "额度", theme::SOFT_GREEN),
-            _ => ("岛仔", "设置", theme::WHITE),
+            _ => ("灵岛", "设置", theme::WHITE),
         };
         let wa = c.text(15.0, base, a, size::TITLE, W::Bold, theme::WHITE, H::Left);
         if !b.is_empty() {

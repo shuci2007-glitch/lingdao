@@ -113,7 +113,7 @@ mod tests {
         config.accounts[0].alias="保留桌面版备注".into();config.accounts[0].enabled=false;let original=config.clone();
         assert_eq!(config.import_claude(&path,"").unwrap(),0);assert_eq!(config,original);assert_eq!(credentials(&config.accounts[0]).unwrap().token,"synthetic-personal");
         assert_eq!(fs::read_to_string(&path).unwrap(),source);assert_eq!(fs::read_to_string(data.join("Local State")).unwrap(),state);
-        let exported=config.json().to_string();assert!(!exported.contains("synthetic-personal")&&!exported.contains("refreshToken"),"岛仔配置不能复制原客户端令牌");
+        let exported=config.json().to_string();assert!(!exported.contains("synthetic-personal")&&!exported.contains("refreshToken"),"灵岛配置不能复制原客户端令牌");
         fs::write(&path,json!({"oauth:tokenCacheV2":sealed(&json!({"acct:other|client:org:https://api.anthropic.com:user:profile":{"token":"synthetic-other","expiresAt":4102444800000i64}}))}).to_string()).unwrap();
         assert!(credentials(&config.accounts[0]).is_err(),"客户端切换账号后不能把另一账号额度显示到旧账号上");
         let _=fs::remove_dir_all(dir);

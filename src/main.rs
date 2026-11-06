@@ -1,10 +1,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
-//! Windows 外壳：无边框透明窗口 + 托盘 + 系统数据，界面全部交给 `daozai::app::App`。
+//! Windows 外壳：无边框透明窗口 + 托盘 + 系统数据，界面全部交给 `lingdao::app::App`。
 
 use eframe::egui::{self, Color32, Pos2};
-use daozai::app::{self, App, Cmd, Env, Options};
-use daozai::smtc;
-use daozai::poll_clock::PollClock;
+use lingdao::app::{self, App, Cmd, Env, Options};
+use lingdao::smtc;
+use lingdao::poll_clock::PollClock;
 use std::time::{Duration, Instant};
 
 mod diagnostics;
@@ -18,7 +18,7 @@ struct Shell {
     media: smtc::Shared,
     seek_rx: Option<std::sync::mpsc::Receiver<bool>>,
     media_control:Option<smtc::ControlWorker>,
-    _resource_monitor:Option<daozai::resources::Monitor>,
+    _resource_monitor:Option<lingdao::resources::Monitor>,
     resource_at:PollClock,
     guard_notified:bool,
     media_enabled: smtc::Poller,
@@ -26,23 +26,23 @@ struct Shell {
     placement_at: PollClock,
     placement_scale: f32,
     /// 上次定位时的目标屏幕与水平位置；变化后立即重新定位，不等下一次轮询。
-    placement_key: (String, i32, daozai::model::Dock),
+    placement_key: (String, i32, lingdao::model::Dock),
     win_x: f32,
     sys: (Option<u8>, bool, PollClock),
     #[cfg(windows)]
-    system_state: daozai::system::Snapshot,
+    system_state: lingdao::system::Snapshot,
     #[cfg(windows)]
     system_ready: bool,
     #[cfg(windows)]
-    system_rx: std::sync::mpsc::Receiver<daozai::system::Observation>,
-    fullscreen: Option<daozai::display_layout::Bounds>,
-    input_state:daozai::input::Monitor,
+    system_rx: std::sync::mpsc::Receiver<lingdao::system::Observation>,
+    fullscreen: Option<lingdao::display_layout::Bounds>,
+    input_state:lingdao::input::Monitor,
     #[cfg(windows)]
-    input_keys:Option<daozai::input::Shortcuts>,
+    input_keys:Option<lingdao::input::Shortcuts>,
     #[cfg(windows)]
-    incoming: Option<daozai::system::Notifications>,
+    incoming: Option<lingdao::system::Notifications>,
     #[cfg(windows)]
-    wechat: Option<daozai::wechat::Listener>,
+    wechat: Option<lingdao::wechat::Listener>,
     #[cfg(windows)]
     wechat_retry: Option<Instant>,
     #[cfg(windows)]
@@ -54,27 +54,27 @@ struct Shell {
     hidden: bool,
     /// 毛玻璃皮肤的背景亮度采样（仅毛玻璃皮肤运行）。
     #[cfg(windows)]
-    backdrop: Option<daozai::backdrop::Sampler>,
+    backdrop: Option<lingdao::backdrop::Sampler>,
     #[cfg(windows)]
-    native: Option<daozai::native::Window>,
+    native: Option<lingdao::native::Window>,
     #[cfg(windows)]
-    tray: Option<daozai::tray::Tray>,
+    tray: Option<lingdao::tray::Tray>,
     #[cfg(windows)]
     autostart: bool,
     /// v0.5.4：蓝牙音频设备（后台线程推送）与音量回声的静默窗口。
     #[cfg(windows)]
-    bt_rx: Option<daozai::bt::Service>,
-    bt: Vec<daozai::bt::Device>,
+    bt_rx: Option<lingdao::bt::Service>,
+    bt: Vec<lingdao::bt::Device>,
     bt_ready: bool,
     volume_quiet: PollClock,
     /// v0.5.5：邮件收信服务（工作线程），以及上次同步给它的账号/开关快照。
-    mail: daozai::mail::Service,
-    mail_sig: (bool, u32, Vec<daozai::mail::Account>),
+    mail: lingdao::mail::Service,
+    mail_sig: (bool, u32, Vec<lingdao::mail::Account>),
     /// v0.5.6：日程（CalDAV）服务与上次下发的配置。
-    cal: daozai::calendar::Service,
-    cal_sig: (Vec<daozai::calendar::Config>, bool),
-    quota: daozai::quota::Service,
-    quota_sig: Option<(bool,Vec<daozai::quota::Account>)>,
+    cal: lingdao::calendar::Service,
+    cal_sig: (Vec<lingdao::calendar::Config>, bool),
+    quota: lingdao::quota::Service,
+    quota_sig: Option<(bool,Vec<lingdao::quota::Account>)>,
     quota_at: PollClock,
 }
 
@@ -88,9 +88,9 @@ impl Shell {
         diagnostics::startup("初始化额度配置");
         if !quota_demo{app.quota_initialize();}
         diagnostics::startup("启动剪贴板记录");
-        {let ctx=cc.egui_ctx.clone();daozai::clipboard::watch(app.clipboard.clone(),move||ctx.request_repaint());}
+        {let ctx=cc.egui_ctx.clone();lingdao::clipboard::watch(app.clipboard.clone(),move||ctx.request_repaint());}
         // 全局快捷键按下时立刻唤醒一帧，避免空闲 1 秒节流导致迟滞。
-        daozai::input::set_wake_context(cc.egui_ctx.clone());
+        lingdao::input::set_wake_context(cc.egui_ctx.clone());
         if std::env::args().any(|arg|arg=="--settings"){app.open_settings();}
         if std::env::args().any(|arg|arg=="--calendar"){app.open_calendar(None);}
         #[cfg(feature="record")]
@@ -104,21 +104,21 @@ impl Shell {
         let media_enabled=smtc::spawn_poller(media.clone(),cc.egui_ctx.clone());
         media_enabled.store(app.settings.visible_pages[0],std::sync::atomic::Ordering::Relaxed);
         #[cfg(windows)]
-        let autostart = daozai::tray::autostart_enabled();
+        let autostart = lingdao::tray::autostart_enabled();
         #[cfg(windows)]
-        let tray = daozai::tray::Tray::start(daozai::tray::State {
+        let tray = lingdao::tray::Tray::start(lingdao::tray::State {
             pet: app.settings.pet,
             minimal: app.settings.minimal,
             autostart,
         });
         diagnostics::startup("初始化通知监听");
         #[cfg(windows)]
-        let incoming=if app.settings.read_notifications {match daozai::system::connect(cc.egui_ctx.clone(),app.settings.qq_only){Ok(rx)=>Some(rx),Err(e)=>{app.listener_status=format!("Windows 无法读取通知：{}",e.code());None}}}else{None};
+        let incoming=if app.settings.read_notifications {match lingdao::system::connect(cc.egui_ctx.clone(),app.settings.qq_only){Ok(rx)=>Some(rx),Err(e)=>{app.listener_status=format!("Windows 无法读取通知：{}",e.code());None}}}else{None};
         // 音频、网络与输入法查询由后台完成，避免首帧等待系统服务。
         diagnostics::startup("创建后台采样与窗口");
         let initial_input=None;
-        #[cfg(windows)] let system_state=daozai::system::Snapshot::default();
-        #[cfg(windows)] let system_rx=daozai::system::observe(cc.egui_ctx.clone(),system_state.clone(),initial_input);
+        #[cfg(windows)] let system_state=lingdao::system::Snapshot::default();
+        #[cfg(windows)] let system_rx=lingdao::system::observe(cc.egui_ctx.clone(),system_state.clone(),initial_input);
         // 岛体大小只作用于主窗口，在首帧之前生效，避免启动时先按 100% 闪一下。
         #[cfg(windows)] eframe::set_root_viewport_scale(app.settings.island_scale());
         Self {
@@ -129,14 +129,14 @@ impl Shell {
             media,
             seek_rx: None,
             media_control:None,
-            _resource_monitor:daozai::resources::Monitor::start(daozai::model::config_dir().join("diagnostics")),
+            _resource_monitor:lingdao::resources::Monitor::start(lingdao::model::config_dir().join("diagnostics")),
             resource_at:PollClock::default(),
             guard_notified:false,
             media_enabled,
             placed: false,
             placement_at: PollClock::default(),
             placement_scale: 0.0,
-            placement_key: (String::new(), 0, daozai::model::Dock::Top),
+            placement_key: (String::new(), 0, lingdao::model::Dock::Top),
             win_x: 0.0,
             sys: (None, false, PollClock::default()),
             #[cfg(windows)]
@@ -144,8 +144,8 @@ impl Shell {
             #[cfg(windows)] system_ready:false,
             #[cfg(windows)] system_rx,
             fullscreen:None,
-            input_state:daozai::input::Monitor::new(initial_input),
-            #[cfg(windows)] input_keys:daozai::input::Shortcuts::start(),
+            input_state:lingdao::input::Monitor::new(initial_input),
+            #[cfg(windows)] input_keys:lingdao::input::Shortcuts::start(),
             #[cfg(windows)] incoming,
             #[cfg(windows)] wechat:None,
             #[cfg(windows)] wechat_retry:None,
@@ -154,7 +154,7 @@ impl Shell {
             #[cfg(windows)] hidden:false,
             #[cfg(windows)] backdrop:None,
             #[cfg(windows)]
-            native: daozai::native::Window::new(cc),
+            native: lingdao::native::Window::new(cc),
             #[cfg(windows)]
             tray,
             #[cfg(windows)]
@@ -164,17 +164,17 @@ impl Shell {
             bt: Vec::new(),
             bt_ready: false,
             volume_quiet: PollClock::default(),
-            mail: daozai::mail::Service::start(),
+            mail: lingdao::mail::Service::start(),
             mail_sig: (false, 0, Vec::new()),
-            cal: daozai::calendar::Service::start(),
+            cal: lingdao::calendar::Service::start(),
             cal_sig: (Vec::new(), true),
-            quota: daozai::quota::Service::start(), quota_sig: None, quota_at: PollClock::default(),
+            quota: lingdao::quota::Service::start(), quota_sig: None, quota_at: PollClock::default(),
         }
     }
 
     #[cfg(windows)]
     fn poll_tray(&mut self) {
-        use daozai::tray::{self, Event};
+        use lingdao::tray::{self, Event};
         let events = self.tray.as_ref().map(|t| t.poll()).unwrap_or_default();
         for e in events {
             match e {
@@ -221,7 +221,7 @@ impl Shell {
         let cursor = cursor_logical(ppp).map(|(x, y)| Pos2::new(x - origin.x, y - origin.y));
         // 所在屏幕换算到窗口逻辑坐标，供通知详情等浮层避开屏幕边缘。
         #[cfg(windows)]
-        let screen=daozai::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|{
+        let screen=lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|{
             let b=d.bounds;
             egui::Rect::from_min_max(Pos2::new(b.left as f32/ppp-origin.x,b.top as f32/ppp-origin.y),Pos2::new(b.right as f32/ppp-origin.x,b.bottom as f32/ppp-origin.y))
         });
@@ -241,7 +241,7 @@ impl Shell {
             network: Some(self.system_state.network),
             cursor,
             idle_seconds: {
-                #[cfg(windows)] {Some(daozai::system::idle_seconds())}
+                #[cfg(windows)] {Some(lingdao::system::idle_seconds())}
                 #[cfg(not(windows))] {None}
             },
             browser_at_top: {
@@ -271,16 +271,16 @@ impl eframe::App for Shell {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.resource_at.ready(Duration::from_secs(30)){
             let (count,bytes)={let textures=ctx.tex_manager();let textures=textures.read();(textures.num_allocated(),textures.allocated().map(|(_,info)|info.bytes_used()).sum())};
-            daozai::resources::TEXTURES.store(count,std::sync::atomic::Ordering::Relaxed);
-            daozai::resources::TEXTURE_BYTES.store(bytes,std::sync::atomic::Ordering::Relaxed);
-            daozai::resources::GALLEYS.store(ctx.fonts(|fonts|fonts.num_galleys_in_cache()),std::sync::atomic::Ordering::Relaxed);
+            lingdao::resources::TEXTURES.store(count,std::sync::atomic::Ordering::Relaxed);
+            lingdao::resources::TEXTURE_BYTES.store(bytes,std::sync::atomic::Ordering::Relaxed);
+            lingdao::resources::GALLEYS.store(ctx.fonts(|fonts|fonts.num_galleys_in_cache()),std::sync::atomic::Ordering::Relaxed);
             self.resource_at=PollClock::now();
         }
-        let guarded=daozai::resources::GUARD.tripped();
+        let guarded=lingdao::resources::GUARD.tripped();
         if guarded && !self.guard_notified {
             // 资源保护熔断：停止音乐会话轮询（含封面、网易云日志）与歌词查询，保住用户电脑，重启后恢复。
             self.guard_notified=true;self.app.opts.fetch_lyrics=false;
-            self.app.alert("岛仔已暂停音乐功能","检测到资源占用异常，已暂停读取音乐信息和歌词。重启岛仔即可恢复；诊断记录在数据目录的 diagnostics 文件夹。",0,false);
+            self.app.alert("灵岛已暂停音乐功能","检测到资源占用异常，已暂停读取音乐信息和歌词。重启灵岛即可恢复；诊断记录在数据目录的 diagnostics 文件夹。",0,false);
         }
         self.media_enabled.store(self.app.settings.visible_pages[0] && !guarded,std::sync::atomic::Ordering::Relaxed);
         // 设置里改了岛体大小：下一帧起主窗口按新倍率栅格化，定位逻辑随像素比变化同步调整画布。
@@ -296,14 +296,14 @@ impl eframe::App for Shell {
         #[cfg(windows)]
         self.poll_tray();
         // 全局快捷键：每帧下发绑定（原子写，开销可忽略），再看是否按下（bit2 = 轮换空闲形态）。
-        daozai::input::set_hotkey_idle(&self.app.settings.hotkey_idle);
-        if daozai::input::take_hotkey() & 4 != 0 {
+        lingdao::input::set_hotkey_idle(&self.app.settings.hotkey_idle);
+        if lingdao::input::take_hotkey() & 4 != 0 {
             let label = self.app.cycle_idle_mode();
             self.app.say(format!("空闲形态：{label}"));
             ctx.request_repaint();
         }
         #[cfg(windows)]
-        let foreground_changed=daozai::native::take_foreground_change();
+        let foreground_changed=lingdao::native::take_foreground_change();
         #[cfg(windows)]
         if foreground_changed {
             // 切到别的程序：收起，并在光标离开前不再自动展开
@@ -316,8 +316,8 @@ impl eframe::App for Shell {
             self.placement_at=PollClock::now();
             self.placement_scale=(ctx.pixels_per_point()*eframe::root_frame_paint_scale());
             self.placement_key=placement_key;
-            self.app.displays=daozai::display_layout::connected();
-            let display=daozai::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
+            self.app.displays=lingdao::display_layout::connected();
+            let display=lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id);
             let offset=self.app.settings.island_offset_ratio();
             if display.is_some_and(|d|self.native.as_ref().is_some_and(|w|w.place_on_display(self.placement_scale,d.bounds,offset,self.app.settings.dock))) {
                 if !self.placed {diagnostics::startup("目标屏幕物理坐标定位完成，已请求显示");}
@@ -359,10 +359,10 @@ impl eframe::App for Shell {
                 self.system_ready=true;
                 self.fullscreen=observation.fullscreen;
             }
-            self.hidden=daozai::display_layout::hide_for_fullscreen(self.app.settings.hide_fullscreen,self.fullscreen,daozai::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|d.bounds));
+            self.hidden=lingdao::display_layout::hide_for_fullscreen(self.app.settings.hide_fullscreen,self.fullscreen,lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|d.bounds));
             // 毛玻璃：在岛体左右两侧和画布底边（都在窗口区域之外）取样，估计岛背后的明暗。
             if self.app.settings.skin.is_glass() && !self.hidden {
-                let sampler=self.backdrop.get_or_insert_with(daozai::backdrop::Sampler::start);
+                let sampler=self.backdrop.get_or_insert_with(lingdao::backdrop::Sampler::start);
                 let ppp=(ctx.pixels_per_point()*eframe::root_frame_paint_scale());
                 if let Some(origin)=self.native.as_ref().and_then(|w|w.logical_origin(ppp)) {
                     let points=self.app.backdrop_points();
@@ -372,7 +372,7 @@ impl eframe::App for Shell {
                 self.backdrop=None;
             }
             if self.app.settings.bluetooth_notifications {
-                if self.bt_rx.is_none() {self.bt_rx=Some(daozai::bt::spawn());}
+                if self.bt_rx.is_none() {self.bt_rx=Some(lingdao::bt::spawn());}
             } else {
                 self.bt_rx=None;
                 self.bt.clear();
@@ -388,7 +388,7 @@ impl eframe::App for Shell {
                 self.wechat_retry=None;
                 self.app.wechat_status.clear();
             }else if self.wechat.is_none() && self.wechat_retry.is_none_or(|at|at.elapsed()>=Duration::from_secs(10)){
-                match daozai::wechat::Listener::new(ctx.clone()){
+                match lingdao::wechat::Listener::new(ctx.clone()){
                     Ok(listener)=>{
                         self.wechat=Some(listener);
                         self.wechat_retry=None;
@@ -401,19 +401,19 @@ impl eframe::App for Shell {
                 }
             }
             let previous_pending=self.app.pending_messengers.len();
-            for (pid,window) in self.wechat.as_ref().map(|listener|listener.take()).unwrap_or_default(){daozai::wechat::trace(format!("岛上显示微信未读 账号 {pid}"));self.app.receive_wechat_reminder_from(pid,window);}
+            for (pid,window) in self.wechat.as_ref().map(|listener|listener.take()).unwrap_or_default(){lingdao::wechat::trace(format!("岛上显示微信未读 账号 {pid}"));self.app.receive_wechat_reminder_from(pid,window);}
             if let Some(rx)=&self.incoming {
-                while let Ok(event)=rx.try_recv(){match event {daozai::system::Incoming::Revoked=>{self.app.settings.read_notifications=false;self.app.settings.save();},daozai::system::Incoming::Status(s)=>self.app.listener_status=s,daozai::system::Incoming::Message(a,id,b)=>self.app.receive_notification(a,id,b)}}
+                while let Ok(event)=rx.try_recv(){match event {lingdao::system::Incoming::Revoked=>{self.app.settings.read_notifications=false;self.app.settings.save();},lingdao::system::Incoming::Status(s)=>self.app.listener_status=s,lingdao::system::Incoming::Message(a,id,b)=>self.app.receive_notification(a,id,b)}}
             }
             if foreground_changed || self.app.pending_messengers.len()!=previous_pending {
                 // 在微信 / QQ 里打开了某个账号的窗口：清掉这个账号的未读。
                 let mut sources:Vec<app::Messenger>=self.app.pending_messengers.iter().map(|u|u.source).collect();sources.dedup();
-                match daozai::wechat::foreground_client(&sources){
+                match lingdao::wechat::foreground_client(&sources){
                     Some((source,pid))=>{
-                        if self.app.pending_messengers.iter().any(|u|u.source==source){daozai::wechat::trace(format!("岛上清除 {} 账号 {pid}（前台切换={foreground_changed}）",source.name()));}
+                        if self.app.pending_messengers.iter().any(|u|u.source==source){lingdao::wechat::trace(format!("岛上清除 {} 账号 {pid}（前台切换={foreground_changed}）",source.name()));}
                         self.app.viewed_client(source,pid);
                     }
-                    None=>if foreground_changed && !sources.is_empty(){daozai::wechat::trace(format!("前台切换但不是消息客户端主窗口：{}；岛上未读 {:?}",daozai::wechat::describe_foreground(),self.app.pending_messengers.iter().map(|u|(u.source.name(),u.pid)).collect::<Vec<_>>()));},
+                    None=>if foreground_changed && !sources.is_empty(){lingdao::wechat::trace(format!("前台切换但不是消息客户端主窗口：{}；岛上未读 {:?}",lingdao::wechat::describe_foreground(),self.app.pending_messengers.iter().map(|u|(u.source.name(),u.pid)).collect::<Vec<_>>()));},
                 }
             }
             if let Some((unread,rx))=&self.tray_opening {
@@ -429,7 +429,7 @@ impl eframe::App for Shell {
                 if !self.app.pending_messengers.contains(&unread){self.opening_messenger=None;}
                 else if started.elapsed()>=Duration::from_secs(4){
                     self.opening_messenger=None;
-                    match daozai::wechat::foreground_client(&[unread.source]){
+                    match lingdao::wechat::foreground_client(&[unread.source]){
                         Some((source,pid))=>self.app.viewed_client(source,pid),
                         None=>self.app.say(format!("{}尚未切到前台，可点图标重试",unread.source.name())),
                     }
@@ -446,7 +446,7 @@ impl eframe::App for Shell {
         // v0.5.5 邮件：开关 / 间隔 / 账号清单变了就重新对齐收信线程，再把事件交给界面。
         let sig=(self.app.settings.mail_enabled,self.app.settings.mail_interval,self.app.mail_accounts().to_vec());
         if sig!=self.mail_sig{
-            let accounts:&[daozai::mail::Account]=if sig.0{ &sig.2 }else{ &[] };
+            let accounts:&[lingdao::mail::Account]=if sig.0{ &sig.2 }else{ &[] };
             self.mail.sync(accounts,sig.1);
             self.mail_sig=sig;
         }
@@ -479,7 +479,7 @@ impl eframe::App for Shell {
             .frame(egui::Frame::new().fill(Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 // 左右停靠时画布是竖向的 SIDE_W × SIDE_H。
-                let size=if self.app.settings.dock.is_side() {egui::vec2(daozai::side_dock::SIDE_W,daozai::side_dock::SIDE_H)} else {egui::vec2(app::WIN_W,app::WIN_H)};
+                let size=if self.app.settings.dock.is_side() {egui::vec2(lingdao::side_dock::SIDE_W,lingdao::side_dock::SIDE_H)} else {egui::vec2(app::WIN_W,app::WIN_H)};
                 let win = egui::Rect::from_min_size(ui.max_rect().min,size);
                 out = Some(self.app.frame(ui, win, &env));
             });
@@ -503,19 +503,19 @@ impl eframe::App for Shell {
                     }
                 }
                 Cmd::ViewMessenger(unread)=>{
-                    #[cfg(windows)] match daozai::wechat::open_unread(unread){
+                    #[cfg(windows)] match lingdao::wechat::open_unread(unread){
                         Ok(())=>{
-                            match daozai::wechat::foreground_client(&[unread.source]){
+                            match lingdao::wechat::foreground_client(&[unread.source]){
                                 Some((source,pid))=>self.app.viewed_client(source,pid),
                                 None=>{self.opening_messenger=Some((unread,Instant::now()));ctx.request_repaint_after(Duration::from_secs(4));}
                             }
                         },
                         Err(_) if self.app.settings.wechat_tray_open && unread.source==app::Messenger::Wechat && self.tray_opening.is_none()=>{
-                            match daozai::wechat::wechat_in_tray(unread){
+                            match lingdao::wechat::wechat_in_tray(unread){
                                 Ok(())=>{
                                     // 缩在托盘：后台线程按下该账号的托盘按钮，不阻塞界面。
                                     let (tx,rx)=std::sync::mpsc::channel();let repaint=ctx.clone();
-                                    std::thread::spawn(move||{let _=tx.send(daozai::wechat::open_wechat_from_tray(unread));repaint.request_repaint();});
+                                    std::thread::spawn(move||{let _=tx.send(lingdao::wechat::open_wechat_from_tray(unread));repaint.request_repaint();});
                                     self.tray_opening=Some((unread,rx));
                                 }
                                 Err(error)=>self.app.say(error),
@@ -526,12 +526,12 @@ impl eframe::App for Shell {
                 }
                 Cmd::Open(p) => {if let Err(e)=open_path(&p){self.app.say(e);}},
                 Cmd::OpenUrl(url)=>{
-                    if let Some(url)=daozai::mail::web_url(&url) {
+                    if let Some(url)=lingdao::mail::web_url(&url) {
                         if open_path(std::path::Path::new(&url)).is_err(){self.app.say("无法打开默认浏览器，请检查 Windows 默认应用设置");}
                     }
                 },
                 Cmd::CalendarImport=>{
-                    #[cfg(windows)] match daozai::system::pick_files_for("选择要导入的日历文件（.ics）",true){
+                    #[cfg(windows)] match lingdao::system::pick_files_for("选择要导入的日历文件（.ics）",true){
                         Ok(files)=>if !files.is_empty(){
                             let read:Vec<(String,String)>=files.iter().map(|path|{
                                 let name=path.file_name().map(|n|n.to_string_lossy().to_string()).unwrap_or_default();
@@ -544,16 +544,16 @@ impl eframe::App for Shell {
                     }
                 },
                 Cmd::AddFiles=>{
-                    #[cfg(windows)] match daozai::system::pick_files(){Ok(files)=>if !files.is_empty(){self.app.on_drop(files);self.app.show_page(3);},Err(e)=>self.app.say(format!("无法选择文件：{}",e.code()))}
+                    #[cfg(windows)] match lingdao::system::pick_files(){Ok(files)=>if !files.is_empty(){self.app.on_drop(files);self.app.show_page(3);},Err(e)=>self.app.say(format!("无法选择文件：{}",e.code()))}
                 },
                 Cmd::DragFile(p)=>{
-                    #[cfg(windows)] if let Err(e)=daozai::system::drag_file(&p){self.app.say(format!("无法拖出文件：{}",e.code()));}
+                    #[cfg(windows)] if let Err(e)=lingdao::system::drag_file(&p){self.app.say(format!("无法拖出文件：{}",e.code()));}
                     ctx.input_mut(|i| i.pointer=Default::default());
                 },
                 Cmd::DisconnectNotifications=>{#[cfg(windows)]{self.incoming=None;self.app.settings.read_notifications=false;self.app.settings.save();self.app.listener_status="已断开，不再读取 Windows 通知".into();}},
                 Cmd::Reveal(p)=>{let _=std::process::Command::new("explorer.exe").arg(format!("/select,{}",p.display())).spawn();},
                 Cmd::QuotaChooseFile=>{
-                    #[cfg(windows)] match daozai::system::pick_files_for("选择 AI 账号的登录 JSON 文件",false){Ok(files)=>if let Some(path)=files.into_iter().next(){self.app.quota_set_source(path);},Err(_)=>self.app.say("无法选择登录文件")}
+                    #[cfg(windows)] match lingdao::system::pick_files_for("选择 AI 账号的登录 JSON 文件",false){Ok(files)=>if let Some(path)=files.into_iter().next(){self.app.quota_set_source(path);},Err(_)=>self.app.say("无法选择登录文件")}
                 },
                 Cmd::QuotaRefresh=>{
                     if self.quota_at.ready(Duration::from_secs(15)) {
@@ -563,14 +563,14 @@ impl eframe::App for Shell {
                 },
                 Cmd::QuotaConnected=>{self.quota_sig=None;},
                 Cmd::ToggleAutostart=>{
-                    #[cfg(windows)] {let want=!self.autostart;match daozai::tray::set_autostart(want){Ok(())=>self.autostart=want,Err(e)=>self.app.say(e)}}
+                    #[cfg(windows)] {let want=!self.autostart;match lingdao::tray::set_autostart(want){Ok(())=>self.autostart=want,Err(e)=>self.app.say(e)}}
                 },
                 Cmd::SetVolume(v)=>{
-                    #[cfg(windows)] daozai::system::set_volume(v);
+                    #[cfg(windows)] lingdao::system::set_volume(v);
                     self.volume_quiet=PollClock::now();
                 },
                 Cmd::ToggleMute=>{
-                    #[cfg(windows)] daozai::system::toggle_mute();
+                    #[cfg(windows)] lingdao::system::toggle_mute();
                     self.volume_quiet=PollClock::now();
                 },
                 Cmd::Copy(text)=>{ctx.copy_text(text);self.app.say("已复制");},
@@ -578,7 +578,7 @@ impl eframe::App for Shell {
                     #[cfg(windows)] if let Some(tray)=&self.tray{tray.notify(&title,&body,self.app.settings.sound);}
                 },
                 cmd @ (Cmd::RequestNotifications|Cmd::RequestQqNotifications)=>{
-                    #[cfg(windows)] {self.app.settings.qq_only=matches!(cmd,Cmd::RequestQqNotifications);self.app.settings.read_notifications=true;self.app.settings.save();self.incoming=None;match daozai::system::connect(ctx.clone(),self.app.settings.qq_only){Ok(rx)=>{self.incoming=Some(rx);self.app.listener_status="正在请求 Windows 通知权限…".into();},Err(e)=>self.app.listener_status=format!("Windows 未允许读取通知：{}。需要相应的系统权限或应用身份。",e.code())}}
+                    #[cfg(windows)] {self.app.settings.qq_only=matches!(cmd,Cmd::RequestQqNotifications);self.app.settings.read_notifications=true;self.app.settings.save();self.incoming=None;match lingdao::system::connect(ctx.clone(),self.app.settings.qq_only){Ok(rx)=>{self.incoming=Some(rx);self.app.listener_status="正在请求 Windows 通知权限…".into();},Err(e)=>self.app.listener_status=format!("Windows 未允许读取通知：{}。需要相应的系统权限或应用身份。",e.code())}}
                 },
                 Cmd::MailSync=>{
                     let enabled=self.app.settings.mail_enabled;
@@ -591,8 +591,8 @@ impl eframe::App for Shell {
                 Cmd::CalendarSync=>self.cal.sync_now(),
                 Cmd::CalendarMonth(month)=>self.cal.view_month(month),
                 Cmd::CalendarForget=>{
-                    if let Err(error)=daozai::calendar::forget_config(){self.app.say(&error);continue;}
-                    if let Some(old)=self.app.forget_calendar(){daozai::calendar::secrets::delete(&old);}
+                    if let Err(error)=lingdao::calendar::forget_config(){self.app.say(&error);continue;}
+                    if let Some(old)=self.app.forget_calendar(){lingdao::calendar::secrets::delete(&old);}
                     let configs=self.app.calendar_configs();
                     self.cal.configure(configs.clone(),self.app.settings.calendar_auto_sync);
                     self.cal_sig=(configs,self.app.settings.calendar_auto_sync);
@@ -733,7 +733,7 @@ fn main() -> std::process::ExitCode {
     match run() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
-            diagnostics::report("岛仔启动或运行失败。", &error.to_string());
+            diagnostics::report("灵岛启动或运行失败。", &error.to_string());
             std::process::ExitCode::FAILURE
         }
     }
@@ -742,15 +742,15 @@ fn main() -> std::process::ExitCode {
 fn run() -> eframe::Result<()> {
     // 单实例（与原版同名互斥体）
     #[cfg(windows)]
-    if !daozai::tray::single_instance() {
-        if !daozai::tray::activate_existing(std::env::args().any(|arg|arg=="--calendar")) {
-            diagnostics::report("岛仔已在运行，但暂时无法打开窗口。\n请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 daozai.exe 后重试。", "已有实例可能正在启动或已无响应。请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 daozai.exe，再重新启动。");
+    if !lingdao::tray::single_instance() {
+        if !lingdao::tray::activate_existing(std::env::args().any(|arg|arg=="--calendar")) {
+            diagnostics::report("灵岛已在运行，但暂时无法打开窗口。\n请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 lingdao.exe 后重试。", "已有实例可能正在启动或已无响应。请稍后重试；若仍无法打开，请在任务管理器的“详细信息”中结束 lingdao.exe，再重新启动。");
         }
         return Ok(());
     }
     diagnostics::startup("初始化图形窗口");
     let viewport = egui::ViewportBuilder::default()
-        .with_title("岛仔").with_icon(daozai::theme::app_icon())
+        .with_title("灵岛").with_icon(lingdao::theme::app_icon())
         .with_inner_size([app::CANVAS_W, app::WIN_H])
         .with_decorations(false)
         .with_transparent(true)
@@ -763,5 +763,5 @@ fn run() -> eframe::Result<()> {
     // 驱动，既丝滑又不空转烧 CPU。Windows 上之前关掉 vsync 是为了避免无上限狂跑，但配合
     // 连续帧 + 空闲定时节流后不再有这个问题。
     let opts = eframe::NativeOptions { viewport, vsync: true, ..Default::default() };
-    graphics::run(opts,|opts|eframe::run_native("岛仔", opts, Box::new(|cc| Ok(Box::new(Shell::new(cc))))))
+    graphics::run(opts,|opts|eframe::run_native("灵岛", opts, Box::new(|cc| Ok(Box::new(Shell::new(cc))))))
 }

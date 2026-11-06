@@ -58,7 +58,7 @@ impl Snapshot {
 }
 
 /// 资源保护：连续两次采样都严重超标时「熔断」，由界面暂停音乐读取与歌词等后台任务。
-/// 只能触发一次，重启岛仔后恢复；单次尖峰不会触发。
+/// 只能触发一次，重启灵岛后恢复；单次尖峰不会触发。
 pub struct Guard {strikes:AtomicUsize,tripped:std::sync::atomic::AtomicBool}
 impl Guard {
     pub const fn new()->Self{Self{strikes:AtomicUsize::new(0),tripped:std::sync::atomic::AtomicBool::new(false)}}

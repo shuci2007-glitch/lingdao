@@ -1,18 +1,18 @@
 [package]
-name = "daozai"
-version = "0.6.64"
+name = "lingdao"
+version = "0.6.65"
 edition = "2021"
 license = "MIT"
-description = "岛仔：Windows 顶部的桌面伙伴与信息岛"
-repository = "https://github.com/Renly1994/xiaotang-daozai"
-default-run = "daozai"
+description = "灵岛：Windows 顶部的桌面伙伴与信息岛"
+repository = "https://github.com/shuci2007-glitch/lingdao"
+default-run = "lingdao"
 
 [lib]
-name = "daozai"
+name = "lingdao"
 path = "src/lib.rs"
 
 [[bin]]
-name = "daozai"
+name = "lingdao"
 path = "src/main.rs"
 
 # 无窗口演示录制器：脚本驱动 + 软件光栅化，输出 RGBA 帧流给 ffmpeg。

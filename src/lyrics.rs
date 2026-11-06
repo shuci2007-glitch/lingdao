@@ -529,7 +529,7 @@ fn request_json(url:&str,referer:&str)->Result<serde_json::Value,FetchError> {
 
 fn request_json_with_retry(url:&str,referer:&str,retry:bool)->Result<serde_json::Value,FetchError> {
     let request=ureq::get(url)
-        .set("User-Agent",concat!("Daozai/",env!("CARGO_PKG_VERSION")," (Windows)"))
+        .set("User-Agent",concat!("Lingdao/",env!("CARGO_PKG_VERSION")," (Windows)"))
         .set("Referer",referer)
         .set("Accept","application/json")
         .timeout(std::time::Duration::from_secs(5));

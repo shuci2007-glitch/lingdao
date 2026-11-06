@@ -55,7 +55,7 @@ fn is_monochrome(id: egui::TextureId) -> bool {
     monochrome().lock().unwrap_or_else(|e| e.into_inner()).contains(&id)
 }
 
-/// 岛仔自己的主题蓝（按钮、进度、饮水等）。只有这几种蓝会换成皮肤的主题色；
+/// 灵岛自己的主题蓝（按钮、进度、饮水等）。只有这几种蓝会换成皮肤的主题色；
 /// 用户为 AI 账号等选的品牌色一律保留色相。
 fn theme_blue(c: [f32; 3]) -> Option<bool> {
     let near = |t: eframe::egui::Color32| {
