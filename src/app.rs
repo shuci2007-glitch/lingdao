@@ -1428,6 +1428,16 @@ impl App {
         self.idle_splash = 0.0;
         self.idle_splashed = false;
     }
+    /// 快捷键轮换空闲形态：黑条 ↔ 水滴，并立刻落盘。返回切换后的形态名。
+    pub fn cycle_idle_mode(&mut self) -> &'static str {
+        self.settings.idle_mode = match self.settings.idle_mode {
+            model::IdleMode::Bar => model::IdleMode::Drop,
+            model::IdleMode::Drop => model::IdleMode::Bar,
+        };
+        self.preview_idle_mode();
+        self.settings.save();
+        self.settings.idle_mode.label()
+    }
     pub(crate) fn effective_minimal(&self)->bool { self.thin_forced() || self.idle_pill() }
     pub(crate) fn pet_enabled(&self)->bool {self.settings.pet && !self.effective_minimal() && !self.side()}
     pub(crate) fn pet_space(&self)->f32 {if self.pet_enabled(){44.0}else{0.0}}

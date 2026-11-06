@@ -1294,6 +1294,23 @@ impl App {
                             setting_row(ui,"空闲水滴","收起后收成正圆，被屏顶吸进去并溅起水花",&mut idle_drop);
                             let idle_after=if idle_drop {crate::model::IdleMode::Drop}else{crate::model::IdleMode::Bar};
                             if idle_after!=idle_before {self.settings.idle_mode=idle_after;self.preview_idle_mode();self.settings.save();}
+                            ui.separator();
+                            // 全局快捷键：在任意窗口下轮换「黑条 ↔ 水滴」。
+                            let current=self.settings.hotkey_idle.clone();
+                            let label=crate::model::hotkey_keys().into_iter().find(|(key,_)|*key==current).map(|(_,label)|label).unwrap_or("不绑定");
+                            let mut chosen=current.clone();
+                            ui.horizontal(|ui|{
+                                ui.label(egui::RichText::new("快捷键 · 空闲形态").size(13.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
+                                    egui::ComboBox::from_id_salt("hotkey-idle").width(132.0).selected_text(label)
+                                        .show_ui(ui,|ui|{
+                                            for (key,text) in crate::model::hotkey_keys() {
+                                                ui.selectable_value(&mut chosen,key.to_string(),text.to_string());
+                                            }
+                                        });
+                                });
+                            });
+                            if chosen!=current {self.settings.hotkey_idle=crate::model::hotkey(&chosen);self.settings.save();}
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");

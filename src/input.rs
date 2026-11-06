@@ -124,6 +124,22 @@ mod shortcuts {
     use std::cell::RefCell;
     use windows::Win32::{Foundation::{HINSTANCE,LPARAM,LRESULT,WPARAM},System::LibraryLoader::GetModuleHandleW,UI::WindowsAndMessaging::*};
     thread_local!{static KEYS:RefCell<SwitchKeys>=RefCell::new(SwitchKeys::default());}
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static BIND_IDLE: AtomicU32 = AtomicU32::new(0);
+    static HOTKEY: AtomicU32 = AtomicU32::new(0);
+    /// 高 8 位装修饰键（1=Ctrl 2=Alt 4=Shift），低 8 位装虚拟键码；0 表示不绑定。
+    fn binding(key:&str)->u32{
+        let (mods,vk)=match key{
+            "ctrl_alt_d"=>(3u32,0x44u32),
+            "ctrl_alt_m"=>(3,0x4D),
+            "ctrl_alt_space"=>(3,0x20),
+            "alt_shift_d"=>(6,0x44),
+            "ctrl_alt_i"=>(3,0x49),
+            "alt_shift_i"=>(6,0x49),
+            _=>(0,0),
+        };
+        if vk==0{0}else{(mods<<8)|vk}
+    }
     pub struct Shortcuts(HHOOK);
     impl Shortcuts {
         pub fn start()->Option<Self>{unsafe{
@@ -131,6 +147,10 @@ mod shortcuts {
         }}
         pub fn allows(&self,context:(usize,usize))->bool{KEYS.with(|keys|keys.borrow_mut().allows(context,Instant::now()))}
         pub fn clear(&self){KEYS.with(|keys|keys.borrow_mut().clear());SWITCH_AT.store(0,std::sync::atomic::Ordering::Relaxed);}
+        /// 设置页改完快捷键后调用；字符串会是 `model::hotkey` 校验过的白名单值。
+        pub fn bind_idle(idle:&str){ BIND_IDLE.store(binding(idle),Ordering::Relaxed); }
+        /// 取走并清空键盘钩子记下的快捷键事件（bit2 = 轮换空闲形态）。
+        pub fn take()->u32{ HOTKEY.swap(0,Ordering::Relaxed) }
     }
     impl Drop for Shortcuts {
         fn drop(&mut self){unsafe{let _=UnhookWindowsHookEx(self.0);}}
@@ -139,6 +159,19 @@ mod shortcuts {
         if code==0 {
             let event=&*(lp.0 as *const KBDLLHOOKSTRUCT);
             if !event.flags.contains(LLKHF_INJECTED){
+                // 全局快捷键：不依赖窗口焦点，按下即匹配；同一组合只算一个动作。
+                let pressed=matches!(wp.0 as u32,WM_KEYDOWN|WM_SYSKEYDOWN);
+                if pressed {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState,VK_CONTROL,VK_MENU,VK_SHIFT};
+                    let held=((GetAsyncKeyState(VK_CONTROL.0 as i32)<0)as u32)
+                        |(((GetAsyncKeyState(VK_MENU.0 as i32)<0)as u32)<<1)
+                        |(((GetAsyncKeyState(VK_SHIFT.0 as i32)<0)as u32)<<2);
+                    let chord=(held<<8)|event.vkCode;
+                    if chord!=0 && chord==BIND_IDLE.load(Ordering::Relaxed) {
+                        HOTKEY.fetch_or(4,Ordering::Relaxed);
+                        wake();
+                    }
+                }
                 let foreground=GetForegroundWindow();
                 let thread=GetWindowThreadProcessId(foreground,None);
                 let mut info=GUITHREADINFO{cbSize:std::mem::size_of::<GUITHREADINFO>()as u32,..Default::default()};
@@ -155,6 +188,24 @@ mod shortcuts {
 }
 #[cfg(windows)]
 pub use shortcuts::Shortcuts;
+
+/// 设置页改完快捷键后调用，绑定立刻生效。
+pub fn set_hotkey_idle(key:&str) {
+    #[cfg(windows)] Shortcuts::bind_idle(key);
+    #[cfg(not(windows))] { let _=key; }
+}
+
+/// 取走键盘钩子记下的全局快捷键事件（bit2 = 轮换空闲形态）。
+pub fn take_hotkey()->u32 {
+    #[cfg(windows)] { Shortcuts::take() }
+    #[cfg(not(windows))] { 0 }
+}
+
+/// 界面上下文：按下全局快捷键时立刻唤醒一帧（空闲时最长 1 秒才重绘）。
+static WAKE: std::sync::OnceLock<eframe::egui::Context> = std::sync::OnceLock::new();
+pub fn set_wake_context(ctx: eframe::egui::Context){ let _=WAKE.set(ctx); }
+#[cfg(windows)]
+fn wake(){ if let Some(ctx)=WAKE.get(){ ctx.request_repaint(); } }
 
 #[cfg(test)]
 mod tests {

@@ -215,6 +215,8 @@ pub struct Settings {
     pub dock: Dock,
     /// 空闲形态：黑条 / 水滴 / 完全隐入。
     pub idle_mode: IdleMode,
+    /// 全局快捷键：轮换空闲形态（白名单值，off = 不绑定）。
+    pub hotkey_idle: String,
     pub settings_theme: crate::settings_theme::SettingsTheme,
     pub pet: bool,
     /// 灵岛嘴巴：按表情切换（一条线 / 收成一个点），可关。
@@ -268,8 +270,29 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
     }
+}
+
+/// 可选全局快捷键。只允许白名单，配置文件被改坏时回落到「不绑定」。
+pub fn hotkey_keys() -> [(&'static str, &'static str); 7] {
+    [
+        ("off", "不绑定"),
+        ("ctrl_alt_d", "Ctrl + Alt + D"),
+        ("ctrl_alt_m", "Ctrl + Alt + M"),
+        ("ctrl_alt_space", "Ctrl + Alt + 空格"),
+        ("alt_shift_d", "Alt + Shift + D"),
+        ("ctrl_alt_i", "Ctrl + Alt + I"),
+        ("alt_shift_i", "Alt + Shift + I"),
+    ]
+}
+
+pub fn hotkey(value: &str) -> String {
+    hotkey_keys()
+        .iter()
+        .find(|(key, _)| *key == value)
+        .map(|(key, _)| (*key).to_string())
+        .unwrap_or_else(|| "off".to_string())
 }
 
 impl Settings {
@@ -310,6 +333,7 @@ impl Settings {
                 "island_shape" => s.island_shape = IslandShape::parse(&v),
                 "dock" => s.dock = Dock::parse(&v),
                 "idle_mode" => s.idle_mode = IdleMode::parse(&v),
+                "hotkey_idle" => s.hotkey_idle = hotkey(&v),
                 "glass_blur" => s.glass_blur = v != "0",
                 "island_size" => s.island_size = island_size_value(v.parse::<u32>().unwrap_or(100)),
                 "island_offset" => s.island_offset = v.parse::<i32>().unwrap_or(0).clamp(-ISLAND_OFFSET_MAX, ISLAND_OFFSET_MAX),
@@ -382,6 +406,7 @@ impl Settings {
                 ("island_shape".into(),self.island_shape.key().into()),
                 ("dock".into(),self.dock.key().into()),
                 ("idle_mode".into(),self.idle_mode.key().into()),
+                ("hotkey_idle".into(), self.hotkey_idle.clone()),
                 ("glass_blur".into(),(self.glass_blur as u8).to_string()),
                 ("island_size".into(),island_size_value(self.island_size).to_string()),
                 ("island_offset".into(),self.island_offset.clamp(-ISLAND_OFFSET_MAX,ISLAND_OFFSET_MAX).to_string()),

@@ -89,6 +89,8 @@ impl Shell {
         if !quota_demo{app.quota_initialize();}
         diagnostics::startup("启动剪贴板记录");
         {let ctx=cc.egui_ctx.clone();daozai::clipboard::watch(app.clipboard.clone(),move||ctx.request_repaint());}
+        // 全局快捷键按下时立刻唤醒一帧，避免空闲 1 秒节流导致迟滞。
+        daozai::input::set_wake_context(cc.egui_ctx.clone());
         if std::env::args().any(|arg|arg=="--settings"){app.open_settings();}
         if std::env::args().any(|arg|arg=="--calendar"){app.open_calendar(None);}
         #[cfg(feature="record")]
@@ -293,6 +295,13 @@ impl eframe::App for Shell {
         }
         #[cfg(windows)]
         self.poll_tray();
+        // 全局快捷键：每帧下发绑定（原子写，开销可忽略），再看是否按下（bit2 = 轮换空闲形态）。
+        daozai::input::set_hotkey_idle(&self.app.settings.hotkey_idle);
+        if daozai::input::take_hotkey() & 4 != 0 {
+            let label = self.app.cycle_idle_mode();
+            self.app.say(format!("空闲形态：{label}"));
+            ctx.request_repaint();
+        }
         #[cfg(windows)]
         let foreground_changed=daozai::native::take_foreground_change();
         #[cfg(windows)]
