@@ -9,11 +9,11 @@ if(-not(Test-Path -LiteralPath $sourcePath)){throw '找不到灵岛程序，请�
 $installDir=Join-Path $env:LOCALAPPDATA 'Programs\Lingdao'
 $exePath=Join-Path $installDir 'lingdao.exe'
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-Get-Process daozai -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exePath} | ForEach-Object {
+Get-Process lingdao -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $exePath} | ForEach-Object {
     $null=$_.CloseMainWindow()
     if(-not $_.WaitForExit(3000)){Stop-Process -Id $_.Id; $_.WaitForExit()}
 }
-if(Test-Path -LiteralPath $exePath){Copy-Item -LiteralPath $exePath -Destination (Join-Path $installDir 'daozai-previous.exe') -Force}
+if(Test-Path -LiteralPath $exePath){Copy-Item -LiteralPath $exePath -Destination (Join-Path $installDir 'lingdao-previous.exe') -Force}
 Copy-Item -LiteralPath $sourcePath -Destination $exePath -Force
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\THIRD_PARTY_NOTICES.txt') -Destination (Join-Path $installDir 'THIRD_PARTY_NOTICES.txt') -Force}
 if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $installDir 'LICENSE') -Force}

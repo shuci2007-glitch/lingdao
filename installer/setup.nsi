@@ -228,7 +228,7 @@ FunctionEnd
 Section "Uninstall"
   Call un.CheckClosed
   Delete "$INSTDIR\lingdao.exe"
-  Delete "$INSTDIR\daozai-previous.exe"
+  Delete "$INSTDIR\lingdao-previous.exe"
   Delete "$INSTDIR\daozai-v0.2-backup.exe"
   Delete "$INSTDIR\LICENSE"
   Delete "$INSTDIR\THIRD_PARTY_NOTICES.txt"
