@@ -1,5 +1,11 @@
 //! 系统媒体会话（SMTC）读取：Windows 10/11 的“正在播放”。
 //! 与原工具使用同一套 API（GlobalSystemMediaTransportControlsSessionManager）。
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 是否读取播放器进程内存（深度媒体）。关闭后只依赖系统媒体会话。
+static DEEP_MEDIA: AtomicBool = AtomicBool::new(true);
+pub fn set_deep_media(enabled: bool) { DEEP_MEDIA.store(enabled, Ordering::Relaxed); }
+fn deep_media() -> bool { DEEP_MEDIA.load(Ordering::Relaxed) }
 
 #[cfg(windows)]
 #[path="netease_timeline.rs"]
@@ -679,9 +685,9 @@ pub fn spawn_poller(state: Shared,ctx:eframe::egui::Context)->Poller {
             }
             let system=query(&mut artwork);
             #[cfg(windows)]
-            let native=netease.poll();
+            let native=if deep_media(){netease.poll()}else{None};
             #[cfg(windows)]
-            let native_pending=netease.pending();
+            let native_pending=if deep_media(){netease.pending()}else{false};
             #[cfg(not(windows))]
             let native=None;
             #[cfg(not(windows))]
@@ -690,7 +696,7 @@ pub fn spawn_poller(state: Shared,ctx:eframe::egui::Context)->Poller {
             memory.update(&mut np,std::time::Instant::now());
             if !np.source.is_empty(){selected_source=np.source.clone();}
             #[cfg(windows)]
-            netease.fill_artwork(&mut np);
+            if deep_media(){netease.fill_artwork(&mut np);}
             playback_clock.update(&mut np);
             if np.title.is_empty() {
                 artwork.clear(true);

@@ -48,6 +48,7 @@ pub mod shape;
 mod fluid;
 pub mod smtc;
 pub mod theme;
+pub mod sfx;
 pub mod settings_theme;
 mod updates;
 

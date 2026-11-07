@@ -200,6 +200,10 @@ impl App {
             title.as_str(),
             "系统音量" | "大写锁定" | "键盘输入语言" | "网络连接" | "电源已连接" | "已切换电池供电" | "蓝牙设备"
         );
+        // 新活动出现时来一声轻响；系统级瞬时提示（音量/大写锁定等）不响。
+        if self.settings.sound && !transient {
+            crate::sfx::play(crate::sfx::Sfx::Pop);
+        }
         let a = Alert {
             source: AlertSource::Internal,
             title,
@@ -1290,27 +1294,55 @@ impl App {
                             setting_number(ui,"眼睛灵敏度",&mut self.settings.pet_eye_speed,0.3,2.5," 倍",0.1);
                             ui.separator();
                             let idle_before=self.settings.idle_mode;
-                            let mut idle_drop=idle_before==crate::model::IdleMode::Drop;
-                            setting_row(ui,"空闲水滴","收起后收成正圆，被屏顶吸进去并溅起水花",&mut idle_drop);
-                            let idle_after=if idle_drop {crate::model::IdleMode::Drop}else{crate::model::IdleMode::Bar};
-                            if idle_after!=idle_before {self.settings.idle_mode=idle_after;self.preview_idle_mode();self.settings.save();}
-                            ui.separator();
-                            // 全局快捷键：在任意窗口下轮换「黑条 ↔ 水滴」。
-                            let current=self.settings.hotkey_idle.clone();
-                            let label=crate::model::hotkey_keys().into_iter().find(|(key,_)|*key==current).map(|(_,label)|label).unwrap_or("不绑定");
-                            let mut chosen=current.clone();
+                            let mut idle_after=idle_before;
                             ui.horizontal(|ui|{
-                                ui.label(egui::RichText::new("快捷键 · 空闲形态").size(13.0));
+                                ui.label(egui::RichText::new("空闲形态").size(13.0));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
-                                    egui::ComboBox::from_id_salt("hotkey-idle").width(132.0).selected_text(label)
+                                    egui::ComboBox::from_id_salt("idle-mode").width(132.0).selected_text(idle_before.label())
                                         .show_ui(ui,|ui|{
-                                            for (key,text) in crate::model::hotkey_keys() {
-                                                ui.selectable_value(&mut chosen,key.to_string(),text.to_string());
+                                            for mode in crate::model::IdleMode::ALL {
+                                                ui.selectable_value(&mut idle_after,mode,mode.label());
                                             }
                                         });
                                 });
                             });
-                            if chosen!=current {self.settings.hotkey_idle=crate::model::hotkey(&chosen);self.settings.save();}
+                            ui.label(egui::RichText::new("黑条=细线；水滴=收成圆点被屏顶吸走；完全隐入=窗口裁空，鼠标贴顶冒回。").size(11.5).color(settings_color(ctx,Color32::from_gray(195),Color32::from_gray(60))));
+                            if idle_after!=idle_before {self.settings.idle_mode=idle_after;self.preview_idle_mode();self.settings.save();}
+                            ui.separator();
+                            // 全局快捷键：隐藏/显示、极简模式、空闲形态。
+                            let mut keys=[self.settings.hotkey_hide.clone(),self.settings.hotkey_minimal.clone(),self.settings.hotkey_idle.clone()];
+                            let titles=["快捷键 · 隐藏/显示","快捷键 · 极简模式","快捷键 · 空闲形态"];
+                            for which in 0..3 {
+                                let current=keys[which].clone();
+                                let label=crate::model::hotkey_keys().into_iter().find(|(key,_)|*key==current).map(|(_,label)|label).unwrap_or("不绑定");
+                                let mut chosen=current.clone();
+                                ui.horizontal(|ui|{
+                                    ui.label(egui::RichText::new(titles[which]).size(13.0));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
+                                        egui::ComboBox::from_id_salt(("hotkey",which)).width(132.0).selected_text(label)
+                                            .show_ui(ui,|ui|{
+                                                for (key,text) in crate::model::hotkey_keys() {
+                                                    let free=key=="off"||key.is_empty();
+                                                    let taken=!free&&keys.iter().enumerate().any(|(other,value)|other!=which&&value==key);
+                                                    ui.add_enabled_ui(!taken,|ui|{
+                                                        ui.selectable_value(&mut chosen,key.to_string(),if taken{format!("{text}（已占用）")}else{text.to_string()});
+                                                    });
+                                                }
+                                            });
+                                    });
+                                });
+                                keys[which]=chosen;
+                            }
+                            if keys[0]!=self.settings.hotkey_hide {self.settings.hotkey_hide=keys[0].clone();self.settings.save();}
+                            if keys[1]!=self.settings.hotkey_minimal {self.settings.hotkey_minimal=keys[1].clone();self.settings.save();}
+                            if keys[2]!=self.settings.hotkey_idle {self.settings.hotkey_idle=keys[2].clone();self.settings.save();}
+                            ui.separator();
+                            setting_row(ui,"久坐提醒","连续活跃一段时间后提示起身",&mut self.settings.sit_remind);
+                            if self.settings.sit_remind {
+                                setting_number(ui,"多久提醒一次",&mut self.settings.sit_minutes,20,180," 分钟",5.0);
+                            }
+                            ui.separator();
+                            setting_number(ui,"移开多久收起",&mut self.settings.leave_delay,0.5,10.0," 秒",0.5);
                         });
                         self.avoidance.settings(ui,&mut self.settings);
                         settings_label(ui,"声音与显示");
@@ -1334,6 +1366,10 @@ impl App {
                             if setting_number(ui,"时间偏移",&mut advance,-5.0,5.0," 秒",0.1){self.settings.lyric_delay_ms=(-advance*1000.0).round()as i32;}
                             ui.add_space(3.0);
                             ui.small("正数提前，负数延后；默认提前 0.35 秒。");
+                        });
+                        settings_label(ui,"播放器");
+                        settings_card(ui,|ui|{
+                            setting_row(ui,"读取播放器内存","关闭后不再读网易云进程内存，只依赖系统媒体会话",&mut self.settings.media_deep);
                         });
                     }
                     2=>{

@@ -125,6 +125,8 @@ mod shortcuts {
     use windows::Win32::{Foundation::{HINSTANCE,LPARAM,LRESULT,WPARAM},System::LibraryLoader::GetModuleHandleW,UI::WindowsAndMessaging::*};
     thread_local!{static KEYS:RefCell<SwitchKeys>=RefCell::new(SwitchKeys::default());}
     use std::sync::atomic::{AtomicU32, Ordering};
+    static BIND_HIDE: AtomicU32 = AtomicU32::new(0);
+    static BIND_MINIMAL: AtomicU32 = AtomicU32::new(0);
     static BIND_IDLE: AtomicU32 = AtomicU32::new(0);
     static HOTKEY: AtomicU32 = AtomicU32::new(0);
     /// 高 8 位装修饰键（1=Ctrl 2=Alt 4=Shift），低 8 位装虚拟键码；0 表示不绑定。
@@ -148,7 +150,11 @@ mod shortcuts {
         pub fn allows(&self,context:(usize,usize))->bool{KEYS.with(|keys|keys.borrow_mut().allows(context,Instant::now()))}
         pub fn clear(&self){KEYS.with(|keys|keys.borrow_mut().clear());SWITCH_AT.store(0,std::sync::atomic::Ordering::Relaxed);}
         /// 设置页改完快捷键后调用；字符串会是 `model::hotkey` 校验过的白名单值。
-        pub fn bind_idle(idle:&str){ BIND_IDLE.store(binding(idle),Ordering::Relaxed); }
+        pub fn bind(hide:&str, minimal:&str, idle:&str){
+            BIND_HIDE.store(binding(hide),Ordering::Relaxed);
+            BIND_MINIMAL.store(binding(minimal),Ordering::Relaxed);
+            BIND_IDLE.store(binding(idle),Ordering::Relaxed);
+        }
         /// 取走并清空键盘钩子记下的快捷键事件（bit2 = 轮换空闲形态）。
         pub fn take()->u32{ HOTKEY.swap(0,Ordering::Relaxed) }
     }
@@ -167,9 +173,13 @@ mod shortcuts {
                         |(((GetAsyncKeyState(VK_MENU.0 as i32)<0)as u32)<<1)
                         |(((GetAsyncKeyState(VK_SHIFT.0 as i32)<0)as u32)<<2);
                     let chord=(held<<8)|event.vkCode;
-                    if chord!=0 && chord==BIND_IDLE.load(Ordering::Relaxed) {
-                        HOTKEY.fetch_or(4,Ordering::Relaxed);
-                        wake();
+                    if chord!=0 {
+                        // 同一组合只算第一个，避免一次按键同时触发多个动作。
+                        let hit=if chord==BIND_HIDE.load(Ordering::Relaxed){1}
+                            else if chord==BIND_MINIMAL.load(Ordering::Relaxed){2}
+                            else if chord==BIND_IDLE.load(Ordering::Relaxed){4}
+                            else{0};
+                        if hit!=0 { HOTKEY.fetch_or(hit,Ordering::Relaxed); wake(); }
                     }
                 }
                 let foreground=GetForegroundWindow();
@@ -190,9 +200,9 @@ mod shortcuts {
 pub use shortcuts::Shortcuts;
 
 /// 设置页改完快捷键后调用，绑定立刻生效。
-pub fn set_hotkey_idle(key:&str) {
-    #[cfg(windows)] Shortcuts::bind_idle(key);
-    #[cfg(not(windows))] { let _=key; }
+pub fn set_hotkeys(hide:&str, minimal:&str, idle:&str) {
+    #[cfg(windows)] Shortcuts::bind(hide, minimal, idle);
+    #[cfg(not(windows))] { let _=(hide,minimal,idle); }
 }
 
 /// 取走键盘钩子记下的全局快捷键事件（bit2 = 轮换空闲形态）。

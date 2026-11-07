@@ -52,6 +52,9 @@ struct Shell {
     tray_opening:Option<(app::Unread,std::sync::mpsc::Receiver<Result<(),String>>)>,
     #[cfg(windows)]
     hidden: bool,
+    /// 全局快捷键「隐藏/显示」切换的用户态隐藏。
+    #[cfg(windows)]
+    user_hidden: bool,
     /// 毛玻璃皮肤的背景亮度采样（仅毛玻璃皮肤运行）。
     #[cfg(windows)]
     backdrop: Option<lingdao::backdrop::Sampler>,
@@ -91,6 +94,7 @@ impl Shell {
         {let ctx=cc.egui_ctx.clone();lingdao::clipboard::watch(app.clipboard.clone(),move||ctx.request_repaint());}
         // 全局快捷键按下时立刻唤醒一帧，避免空闲 1 秒节流导致迟滞。
         lingdao::input::set_wake_context(cc.egui_ctx.clone());
+        lingdao::sfx::warmup();
         if std::env::args().any(|arg|arg=="--settings"){app.open_settings();}
         if std::env::args().any(|arg|arg=="--calendar"){app.open_calendar(None);}
         #[cfg(feature="record")]
@@ -152,6 +156,7 @@ impl Shell {
             #[cfg(windows)] opening_messenger:None,
             #[cfg(windows)] tray_opening:None,
             #[cfg(windows)] hidden:false,
+            #[cfg(windows)] user_hidden:false,
             #[cfg(windows)] backdrop:None,
             #[cfg(windows)]
             native: lingdao::native::Window::new(cc),
@@ -295,9 +300,23 @@ impl eframe::App for Shell {
         }
         #[cfg(windows)]
         self.poll_tray();
-        // 全局快捷键：每帧下发绑定（原子写，开销可忽略），再看是否按下（bit2 = 轮换空闲形态）。
-        lingdao::input::set_hotkey_idle(&self.app.settings.hotkey_idle);
-        if lingdao::input::take_hotkey() & 4 != 0 {
+        // 全局快捷键：每帧下发绑定（原子写，开销可忽略），再看是否按下。
+        lingdao::smtc::set_deep_media(self.app.settings.media_deep);
+        lingdao::input::set_hotkeys(&self.app.settings.hotkey_hide, &self.app.settings.hotkey_minimal, &self.app.settings.hotkey_idle);
+        let hotkey = lingdao::input::take_hotkey();
+        #[cfg(windows)]
+        if hotkey & 1 != 0 {
+            self.user_hidden = !self.user_hidden;
+            self.app.say(if self.user_hidden { "灵岛已隐藏 · 再按一次恢复" } else { "灵岛已显示" });
+            ctx.request_repaint();
+        }
+        if hotkey & 2 != 0 {
+            let next = !self.app.settings.minimal;
+            self.app.set_minimal(next);
+            self.app.say(if next { "极简模式已打开" } else { "极简模式已关闭" });
+            ctx.request_repaint();
+        }
+        if hotkey & 4 != 0 {
             let label = self.app.cycle_idle_mode();
             self.app.say(format!("空闲形态：{label}"));
             ctx.request_repaint();
@@ -359,7 +378,7 @@ impl eframe::App for Shell {
                 self.system_ready=true;
                 self.fullscreen=observation.fullscreen;
             }
-            self.hidden=lingdao::display_layout::hide_for_fullscreen(self.app.settings.hide_fullscreen,self.fullscreen,lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|d.bounds));
+            self.hidden=self.user_hidden || lingdao::display_layout::hide_for_fullscreen(self.app.settings.hide_fullscreen,self.fullscreen,lingdao::display_layout::selected(&self.app.displays,&self.app.settings.display_id).map(|d|d.bounds));
             // 毛玻璃：在岛体左右两侧和画布底边（都在窗口区域之外）取样，估计岛背后的明暗。
             if self.app.settings.skin.is_glass() && !self.hidden {
                 let sampler=self.backdrop.get_or_insert_with(lingdao::backdrop::Sampler::start);

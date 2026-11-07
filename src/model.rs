@@ -210,24 +210,25 @@ impl Dock {
     pub fn is_side(self) -> bool { self != Self::Top }
 }
 
-/// 灵岛空闲形态：黑条 / 水滴（收成正圆被屏顶吸走并溅起水花）。
+/// 灵岛空闲形态：黑条 / 水滴（收成正圆被屏顶吸走并溅起水花）/ 完全隐入。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IdleMode {
     #[default]
     Bar,
     Drop,
+    Hidden,
 }
 
 impl IdleMode {
-    pub const ALL: [IdleMode; 2] = [IdleMode::Bar, IdleMode::Drop];
+    pub const ALL: [IdleMode; 3] = [IdleMode::Bar, IdleMode::Drop, IdleMode::Hidden];
     pub fn key(self) -> &'static str {
-        match self { Self::Bar => "bar", Self::Drop => "drop" }
+        match self { Self::Bar => "bar", Self::Drop => "drop", Self::Hidden => "hidden" }
     }
     pub fn parse(value: &str) -> Self {
-        match value { "drop" => Self::Drop, _ => Self::Bar }
+        match value { "drop" => Self::Drop, "hidden" => Self::Hidden, _ => Self::Bar }
     }
     pub fn label(self) -> &'static str {
-        match self { Self::Bar => "黑条", Self::Drop => "水滴" }
+        match self { Self::Bar => "黑条", Self::Drop => "水滴", Self::Hidden => "完全隐入" }
     }
 }
 
@@ -258,12 +259,22 @@ pub struct Settings {
     pub idle_mode: IdleMode,
     /// 全局快捷键：轮换空闲形态（白名单值，off = 不绑定）。
     pub hotkey_idle: String,
+    /// 全局快捷键：隐藏/显示、极简模式。
+    pub hotkey_hide: String,
+    pub hotkey_minimal: String,
     pub settings_theme: crate::settings_theme::SettingsTheme,
     pub pet: bool,
     /// 灵岛嘴巴：按表情切换（一条线 / 收成一个点），可关。
     pub pet_mouth: bool,
     /// 眼睛跟随鼠标的灵敏度倍率。
     pub pet_eye_speed: f32,
+    /// 久坐提醒：连续活跃一段时间后提示起身。
+    pub sit_remind: bool,
+    pub sit_minutes: u32,
+    /// 鼠标移开后多久收起（秒）。
+    pub leave_delay: f32,
+    /// 深度媒体：关闭后不再读播放器进程内存，只依赖系统媒体会话。
+    pub media_deep: bool,
     pub minimal: bool,
     pub browser_minimal: bool,
     pub avoid_browsers: bool,
@@ -313,7 +324,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: false, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), hotkey_hide: "off".into(), hotkey_minimal: "off".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, sit_remind: true, sit_minutes: 50, leave_delay: 3.0, media_deep: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: false, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
     }
 }
 
@@ -377,12 +388,18 @@ impl Settings {
                 "dock" => s.dock = Dock::parse(&v),
                 "idle_mode" => s.idle_mode = IdleMode::parse(&v),
                 "hotkey_idle" => s.hotkey_idle = hotkey(&v),
+                "hotkey_hide" => s.hotkey_hide = hotkey(&v),
+                "hotkey_minimal" => s.hotkey_minimal = hotkey(&v),
                 "glass_blur" => s.glass_blur = v != "0",
                 "island_size" => s.island_size = island_size_value(v.parse::<u32>().unwrap_or(100)),
                 "island_offset" => s.island_offset = v.parse::<i32>().unwrap_or(0).clamp(-ISLAND_OFFSET_MAX, ISLAND_OFFSET_MAX),
                 "pet" => s.pet = v == "1" || v.eq_ignore_ascii_case("true"),
                 "pet_mouth" => s.pet_mouth = v != "0",
                 "pet_eye_speed" => s.pet_eye_speed = v.parse::<f32>().unwrap_or(1.0).clamp(0.3, 2.5),
+                "sit_remind" => s.sit_remind = v != "0",
+                "sit_minutes" => s.sit_minutes = v.parse::<u32>().unwrap_or(50).clamp(20, 180),
+                "leave_delay" => s.leave_delay = v.parse::<f32>().unwrap_or(3.0).clamp(0.5, 10.0),
+                "media_deep" => s.media_deep = v != "0",
                 "minimal" => s.minimal = v == "1" || v.eq_ignore_ascii_case("true"),
                 "browser_minimal" => s.browser_minimal = v == "1",
                 "avoid_browsers" => s.avoid_browsers = v != "0",
@@ -451,6 +468,8 @@ impl Settings {
                 ("dock".into(),self.dock.key().into()),
                 ("idle_mode".into(),self.idle_mode.key().into()),
                 ("hotkey_idle".into(), self.hotkey_idle.clone()),
+                ("hotkey_hide".into(), self.hotkey_hide.clone()),
+                ("hotkey_minimal".into(), self.hotkey_minimal.clone()),
                 ("glass_blur".into(),(self.glass_blur as u8).to_string()),
                 ("island_size".into(),island_size_value(self.island_size).to_string()),
                 ("island_offset".into(),self.island_offset.clamp(-ISLAND_OFFSET_MAX,ISLAND_OFFSET_MAX).to_string()),
@@ -458,6 +477,10 @@ impl Settings {
                 ("pet".into(), if self.pet { "1".to_string() } else { "0".to_string() }),
                 ("pet_mouth".into(), if self.pet_mouth { "1" } else { "0" }.into()),
                 ("pet_eye_speed".into(), format!("{:.2}", self.pet_eye_speed)),
+                ("sit_remind".into(), (self.sit_remind as u8).to_string()),
+                ("sit_minutes".into(), self.sit_minutes.to_string()),
+                ("leave_delay".into(), format!("{:.1}", self.leave_delay)),
+                ("media_deep".into(), (self.media_deep as u8).to_string()),
                 ("minimal".into(), if self.minimal { "1".to_string() } else { "0".to_string() }),
                 ("browser_minimal".into(), (self.browser_minimal as u8).to_string()),
                 ("avoid_browsers".into(), (self.avoid_browsers as u8).to_string()),

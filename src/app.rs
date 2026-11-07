@@ -38,7 +38,7 @@ pub const IDLE_DROP_H: f32 = 18.0;
 
 /// 空闲时应呈现的形态。
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Present { Bar, Pill }
+enum Present { Bar, Pill, Hidden }
 pub const FLARE: f32 = 17.6; // 顶部外翻肩宽
 pub const FLARE_H: f32 = 16.0; // 外翻收敛高度
 pub const RAD: f32 = 33.0; // 底部圆角
@@ -625,6 +625,10 @@ pub struct App {
     idle_splashed: bool,
     idle_preview_until: f64,
     near_top_now: bool,
+    /// 久坐计时起点（0 = 未开始）。
+    sit_since: f64,
+    /// 上一帧是否展开（用于展开音效）。
+    was_open: bool,
 
     // 拖入
     pub(crate) drag_hot: bool,
@@ -788,6 +792,8 @@ impl App {
             idle_splashed: false,
             idle_preview_until: 0.0,
             near_top_now: false,
+            sit_since: 0.0,
+            was_open: false,
             drag_hot: false,
             drag_a: 0.0,
             drag_saved: None,
@@ -1425,12 +1431,15 @@ impl App {
             && !self.is_editing()
     }
     fn previewing(&self)->bool { self.t < self.idle_preview_until }
-    /// 用户选择的空闲形态对应的呈现方式；左右停靠时不走水滴。
+    /// 用户选择的空闲形态对应的呈现方式；左右停靠时不走水滴/隐入。
     fn selected_present(&self)->Present {
-        match self.settings.idle_mode {
+        let raw = match self.settings.idle_mode {
             model::IdleMode::Drop if !self.settings.dock.is_side() => Present::Pill,
+            model::IdleMode::Hidden if !self.settings.dock.is_side() => Present::Hidden,
             _ => Present::Bar,
-        }
+        };
+        // 「完全隐入」在光标贴顶时临时冒成小圆点，供鼠标点回来。
+        if self.near_top_now && raw == Present::Hidden { Present::Pill } else { raw }
     }
     /// 是否应收成「水滴」圆点。
     fn idle_pill(&self)->bool {
@@ -1438,6 +1447,13 @@ impl App {
             return matches!(self.selected_present(), Present::Pill);
         }
         self.idle() && matches!(self.selected_present(), Present::Pill)
+    }
+    /// 是否应完全隐入（窗口裁剪为空）。
+    fn idle_hidden(&self)->bool {
+        if self.previewing() && !self.open && self.notice.is_none() && !self.is_editing() {
+            return matches!(self.selected_present(), Present::Hidden);
+        }
+        self.idle() && matches!(self.selected_present(), Present::Hidden)
     }
     /// 是否强制细线：浏览器避让；或手动「极简刘海」且空闲形态为「黑条」。
     fn thin_forced(&self)->bool {
@@ -1453,11 +1469,12 @@ impl App {
         self.idle_splash = 0.0;
         self.idle_splashed = false;
     }
-    /// 快捷键轮换空闲形态：黑条 ↔ 水滴，并立刻落盘。返回切换后的形态名。
+    /// 快捷键轮换空闲形态：黑条 → 水滴 → 完全隐入 → 黑条，并立刻落盘。返回切换后的形态名。
     pub fn cycle_idle_mode(&mut self) -> &'static str {
         self.settings.idle_mode = match self.settings.idle_mode {
             model::IdleMode::Bar => model::IdleMode::Drop,
-            model::IdleMode::Drop => model::IdleMode::Bar,
+            model::IdleMode::Drop => model::IdleMode::Hidden,
+            model::IdleMode::Hidden => model::IdleMode::Bar,
         };
         self.preview_idle_mode();
         self.settings.save();
@@ -1627,6 +1644,17 @@ impl App {
             Some(c) => c.y <= 48.0 && (c.x - cx).abs() <= 220.0,
             None => false,
         };
+        // 久坐提醒：只要键鼠一直有动静（空闲时间短）就累计，到阈值提醒一次再重新计时。
+        if self.settings.sit_remind && env.idle_seconds.unwrap_or(0.0) < 90.0 {
+            if self.sit_since <= 0.0 { self.sit_since = self.t; }
+            else if self.t - self.sit_since >= self.settings.sit_minutes as f64 * 60.0 {
+                self.sit_since = self.t;
+                let minutes = self.settings.sit_minutes;
+                self.alert("起来活动一下", format!("连续坐了 {minutes} 分钟，走两步再继续"), 1, true);
+            }
+        } else {
+            self.sit_since = 0.0;
+        }
         let on_notice=env.cursor.is_some_and(|c|self.messenger_badge_rect(win,self.island_rect(win,self.w.pos,self.h.pos)).is_some_and(|r|r.contains(c)) || self.notice_rect(cx,top).is_some_and(|r|r.contains(c))||self.notice_details_rect(cx,top).is_some_and(|r|r.contains(c)));
         if !inside {
             self.hover_lock = false;
@@ -1716,6 +1744,11 @@ impl App {
         if self.idle_splash > 0.0 {
             self.idle_splash = (self.idle_splash - dt / 0.9).max(0.0);
         }
+        // 展开瞬间：播放「啵」一声（受提醒声音开关控制）。
+        if self.open && !self.was_open && self.settings.sound {
+            crate::sfx::play(crate::sfx::Sfx::Boop);
+        }
+        self.was_open = self.open;
         self.update_pet(env, cx);
 
         // ---------- 绘制 ----------
@@ -1882,7 +1915,10 @@ impl App {
 
         // ---------- 输出 ----------
         let rel = |r: Rect| r.translate(-win.min.to_vec2());
-        let mut region = if side {
+        let mut region = if self.idle_hidden() {
+            // 「完全隐入」：窗口裁剪为空，看似彻底消失；仍以 10fps 轮询光标贴顶冒回。
+            Rect::from_min_size(Pos2::new(cx, top), Vec2::ZERO)
+        } else if side {
             // 侧边：面板从边缘滑出，区域包含肩部（沿边缘上下）与外侧阴影，并一直延伸到屏幕边缘。
             let r=if p > 0.02 || self.open {
                 let height=self.expanded_height().max(self.h.pos)*1.08+FLARE*2.0+24.0;
@@ -1969,7 +2005,7 @@ impl App {
         let splashing=!self.water_ring.settled(1.0) || self.idle_drop > 0.001 || self.idle_splash > 0.001;
         let animating=transitioning || splashing || ambient || pet_visible && self.pet.state!=PetState::Sleeping;
         // 交互形变保持 60 帧，媒体 30 帧；小表情 20 帧，睡眠 10 帧，涟漪 60 帧，静态界面每秒核对提醒。
-        let repaint_after=std::time::Duration::from_secs_f64(if transitioning{1.0/60.0}else if splashing{1.0/60.0}else if ambient{1.0/30.0}else if pet_visible{if self.pet.state==PetState::Sleeping{0.1}else{0.05}}else{1.0});
+        let repaint_after=std::time::Duration::from_secs_f64(if transitioning{1.0/60.0}else if splashing{1.0/60.0}else if ambient{1.0/30.0}else if pet_visible{if self.pet.state==PetState::Sleeping{0.1}else{0.05}}else if self.idle_hidden(){0.1}else{1.0});
         cmds.append(&mut self.pending);
         FrameOut {
             region: rel(floating_toast.into_iter().chain(self.shelf_menu_rect.map(|r|r.union(r + ctx.style().visuals.popup_shadow.margin()).expand(1.0 / ctx.pixels_per_point()))).fold(region,Rect::union).intersect(ui.max_rect())),
@@ -2358,7 +2394,7 @@ impl App {
             self.hover_since = None;
             if self.open {
                 let since = *self.leave_since.get_or_insert(t);
-                if t - since >= LEAVE_DELAY {
+                if t - since >= self.settings.leave_delay.clamp(0.5, 10.0) as f64 {
                     self.open = false;
                     self.leave_since = None;
                     self.w.tune(CLOSE.0, CLOSE.1);
