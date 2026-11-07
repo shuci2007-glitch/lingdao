@@ -3,7 +3,7 @@ use eframe::egui;
 use std::{io::{Read, Write}, path::PathBuf, sync::{mpsc::{self, Receiver}, Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
 
 const REPOSITORY: &str = "https://github.com/shuci2007-glitch/lingdao";
-const API: &str = "https://api.github.com/repos/Renly1994/xiaotang-daozai/releases/latest";
+const API: &str = "https://api.github.com/repos/shuci2007-glitch/lingdao/releases/latest";
 const RELEASES: &str = "https://github.com/shuci2007-glitch/lingdao/releases/latest";
 const BACKUP_DOWNLOAD: &str = "https://hcnounojrizu.feishu.cn/wiki/MpfXwFGf8ijhitkfuxdcELdBnqg";
 
