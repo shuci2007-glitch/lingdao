@@ -17,6 +17,9 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetLastInputInfo, LASTINPUTINFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
 use windows::UI::Notifications::Management::{
     UserNotificationListener, UserNotificationListenerAccessStatus,
 };
@@ -481,6 +484,58 @@ pub fn drag_file(path: &std::path::Path) -> Result<()> {
             OleUninitialize();
         }
         result
+    }
+}
+
+/// 常见会议 / 投屏 / 演示进程；命中任一时视为「勿扰」（开会或投屏中）。
+const MEETING_EXES: &[&str] = &[
+    "ms-teams.exe",
+    "teams.exe",
+    "msteams.exe",
+    "zoom.exe",
+    "wemeetapp.exe",
+    "wemeet.exe",
+    "dingtalk.exe",
+    "feishu.exe",
+    "lark.exe",
+    "skype.exe",
+    "webex.exe",
+    "ciscowebexstart.exe",
+    "wirelessdisp.exe",
+    "airserver.exe",
+    "reflector.exe",
+    "vmix.exe",
+];
+
+/// 是否正在开会 / 投屏 / 演示：检测到任一常见会议软件进程即视为勿扰状态。
+/// 枚举进程失败或无权访问时回落为 false（不误伤普通使用）。
+pub fn meeting_running() -> bool {
+    unsafe {
+        let snap: windows::Win32::Foundation::HANDLE = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut found = false;
+        if Process32FirstW(snap, &mut entry).is_ok() {
+            loop {
+                let name = String::from_utf16_lossy(
+                    &entry.szExeFile[..entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(0)],
+                );
+                if MEETING_EXES.iter().any(|m| name.eq_ignore_ascii_case(m)) {
+                    found = true;
+                    break;
+                }
+                if Process32NextW(snap, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snap);
+        found
     }
 }
 #[cfg(test)]

@@ -5,7 +5,7 @@ use eframe::egui::{self, Color32, Pos2};
 use lingdao::app::{self, App, Cmd, Env, Options};
 use lingdao::smtc;
 use lingdao::poll_clock::PollClock;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 mod diagnostics;
 mod graphics;
@@ -69,6 +69,8 @@ struct Shell {
     bt_rx: Option<lingdao::bt::Service>,
     bt: Vec<lingdao::bt::Device>,
     bt_ready: bool,
+    /// 复制敏感文本（验证码等）后，预约在多少秒后自动清空剪贴板（仅 Windows 真正清空）。
+    clip_clear: Option<(std::time::SystemTime, String)>,
     volume_quiet: PollClock,
     /// v0.5.5：邮件收信服务（工作线程），以及上次同步给它的账号/开关快照。
     mail: lingdao::mail::Service,
@@ -168,6 +170,7 @@ impl Shell {
             bt_rx: None,
             bt: Vec::new(),
             bt_ready: false,
+            clip_clear: None,
             volume_quiet: PollClock::default(),
             mail: lingdao::mail::Service::start(),
             mail_sig: (false, 0, Vec::new()),
@@ -288,6 +291,8 @@ impl eframe::App for Shell {
             self.app.alert("灵岛已暂停音乐功能","检测到资源占用异常，已暂停读取音乐信息和歌词。重启灵岛即可恢复；诊断记录在数据目录的 diagnostics 文件夹。",0,false);
         }
         self.media_enabled.store(self.app.settings.visible_pages[0] && !guarded,std::sync::atomic::Ordering::Relaxed);
+        // 自定义强调色：每帧按当前设置刷新（空 = 默认蓝）。
+        lingdao::theme::set_accent(lingdao::theme::parse_hex(&self.app.settings.accent).unwrap_or(lingdao::theme::BLUE));
         // 设置里改了岛体大小：下一帧起主窗口按新倍率栅格化，定位逻辑随像素比变化同步调整画布。
         #[cfg(windows)] eframe::share_root_font_scale(self.app.settings_open);
         #[cfg(windows)] eframe::set_root_viewport_scale(self.app.settings.island_scale());
@@ -461,6 +466,18 @@ impl eframe::App for Shell {
                 if !success{self.app.say("播放器未完成跳转，请打开客户端后重试");}
             }
         }
+        // 验证码这类敏感文本只占用剪贴板一小会儿；只清我们放进去的那一段，
+        // 用户中途复制了别的东西就不动它。
+        #[cfg(windows)]
+        if let Some((at, text)) = &self.clip_clear {
+            let hold = self.app.settings.clip_clear_secs as u64;
+            // 时钟被回拨时 duration_since 会失败；隐私场景一律按「已到期」立即清掉，不赌时间。
+            let elapsed = SystemTime::now().duration_since(*at).unwrap_or(Duration::MAX);
+            if hold == 0 || elapsed >= Duration::from_secs(hold) {
+                if clipboard_text().as_deref() == Some(text.as_str()) { ctx.copy_text(String::new()); }
+                self.clip_clear = None;
+            }
+        }
         let env = self.env(ctx);
         // v0.5.5 邮件：开关 / 间隔 / 账号清单变了就重新对齐收信线程，再把事件交给界面。
         let sig=(self.app.settings.mail_enabled,self.app.settings.mail_interval,self.app.mail_accounts().to_vec());
@@ -592,7 +609,12 @@ impl eframe::App for Shell {
                     #[cfg(windows)] lingdao::system::toggle_mute();
                     self.volume_quiet=PollClock::now();
                 },
-                Cmd::Copy(text)=>{ctx.copy_text(text);self.app.say("已复制");},
+                Cmd::Copy(text)=>{
+                    let hold=self.app.settings.clip_clear_secs;
+                    if hold>0 { self.clip_clear=Some((SystemTime::now(),text.clone())); }
+                    ctx.copy_text(text);
+                    self.app.say(if hold>0 {format!("已复制 · {hold} 秒后自动清空")} else {"已复制".to_string()});
+                },
                 Cmd::Notify(title,body)=>{
                     #[cfg(windows)] if let Some(tray)=&self.tray{tray.notify(&title,&body,self.app.settings.sound);}
                 },
@@ -695,6 +717,43 @@ fn local_now() -> (String, String, String) {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let (h, m, s) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
     (format!("{h:02}:{m:02}:{s:02}"), "1970-01-01".into(), "1月1日 周四".into())
+}
+
+#[cfg(windows)]
+fn clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::{HGLOBAL, HWND};
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    use windows::Win32::System::Ole::CF_UNICODETEXT;
+    unsafe {
+        if OpenClipboard(HWND::default()).is_err() {
+            return None;
+        }
+        let text = match GetClipboardData(CF_UNICODETEXT.0 as u32) {
+            Ok(handle) => {
+                let ptr = GlobalLock(HGLOBAL(handle.0)) as *const u16;
+                if ptr.is_null() {
+                    None
+                } else {
+                    let mut len = 0usize;
+                    while *ptr.add(len) != 0 {
+                        len += 1;
+                    }
+                    let value = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+                    let _ = GlobalUnlock(HGLOBAL(handle.0));
+                    Some(value)
+                }
+            }
+            Err(_) => None,
+        };
+        let _ = CloseClipboard();
+        text
+    }
+}
+
+#[cfg(not(windows))]
+fn clipboard_text() -> Option<String> {
+    None
 }
 
 #[cfg(windows)]

@@ -8,6 +8,7 @@
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 // ---------- 颜色（原版逐像素取色，少量为审美微调） ----------
 pub const RED: Color32 = Color32::from_rgb(242, 48, 70);
@@ -30,8 +31,46 @@ pub const WATER_TRACK: Color32 = Color32::from_rgb(15, 38, 64);
 pub const YELLOW: Color32 = Color32::from_rgb(255, 196, 61);
 
 pub fn alpha_blue(a: f32) -> Color32 {
-    Color32::from_rgba_unmultiplied(BLUE.r(), BLUE.g(), BLUE.b(), (255.0 * a) as u8)
+    let c = accent();
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (255.0 * a) as u8)
 }
+
+// 自定义强调色：配置文件里为空时使用默认蓝（BLUE）。界面里所有强调色都走 accent()，
+// 改一处即可整体换色。用原子量存 RGBA，运行时改色无需复制大对象。
+const fn pack(c: Color32) -> u32 {
+    ((c.r() as u32) << 24) | ((c.g() as u32) << 16) | ((c.b() as u32) << 8) | (c.a() as u32)
+}
+fn unpack(v: u32) -> Color32 {
+    Color32::from_rgba_unmultiplied(((v >> 24) & 0xff) as u8, ((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8)
+}
+pub fn accent() -> Color32 {
+    unpack(ACCENT.load(Ordering::Relaxed))
+}
+pub fn set_accent(c: Color32) {
+    ACCENT.store(pack(c), Ordering::Relaxed);
+}
+/// 强调色的深色版（如进度条底色、描边）。
+pub fn accent_deep() -> Color32 {
+    let c = accent();
+    Color32::from_rgb((c.r() as f32 * 0.45) as u8, (c.g() as f32 * 0.45) as u8, (c.b() as f32 * 0.45) as u8)
+}
+pub fn alpha_accent(a: f32) -> Color32 {
+    let c = accent();
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), (255.0 * a) as u8)
+}
+/// 解析 #RRGGBB 或 RRGGBB；非法返回 None（调用方据此回落默认蓝）。
+pub fn parse_hex(text: &str) -> Option<Color32> {
+    let t = text.trim_start_matches('#');
+    if t.len() != 6 || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&t[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&t[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&t[4..6], 16).ok()?;
+    Some(Color32::from_rgb(r, g, b))
+}
+
+static ACCENT: AtomicU32 = AtomicU32::new(pack(BLUE));
 
 /// 字重档位。
 #[derive(Clone, Copy, PartialEq, Eq)]

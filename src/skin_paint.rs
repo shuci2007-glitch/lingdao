@@ -64,11 +64,12 @@ fn theme_blue(c: [f32; 3]) -> Option<bool> {
     };
     use eframe::egui::Color32 as C;
     // 界面里实际用到的蓝：按钮、选中态、链接、进度、饮水；不含 AI 账号可选的品牌蓝。
-    const BRIGHT: [C; 8] = [crate::theme::BLUE, crate::theme::CYAN, C::from_rgb(82, 162, 255), C::from_rgb(10, 132, 255), C::from_rgb(70, 150, 255), C::from_rgb(64, 156, 255), C::from_rgb(86, 204, 242), C::from_rgb(77, 192, 242)];
-    const DEEP: [C; 4] = [crate::theme::BLUE_DEEP, crate::theme::WATER_TRACK, C::from_rgb(45, 105, 165), C::from_rgb(28, 65, 100)];
-    if BRIGHT.iter().any(|t| near(*t)) {
+    // 用运行时数组（accent() 非 const，不能进 const）。
+    let bright = [crate::theme::accent(), crate::theme::CYAN, C::from_rgb(82, 162, 255), C::from_rgb(10, 132, 255), C::from_rgb(70, 150, 255), C::from_rgb(64, 156, 255), C::from_rgb(86, 204, 242), C::from_rgb(77, 192, 242)];
+    let deep = [crate::theme::BLUE_DEEP, crate::theme::WATER_TRACK, C::from_rgb(45, 105, 165), C::from_rgb(28, 65, 100)];
+    if bright.iter().any(|t| near(*t)) {
         Some(true)
-    } else if DEEP.iter().any(|t| near(*t)) {
+    } else if deep.iter().any(|t| near(*t)) {
         Some(false)
     } else {
         None

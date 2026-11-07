@@ -320,11 +320,27 @@ pub struct Settings {
     pub calendar_auto_sync: bool,
     /// 记录最近复制的文字（最近记录与固定条目均在本机保存）。
     pub clipboard_history: bool,
+    /// 自定义强调色（十六进制 #RRGGBB 或 RRGGBB；空 = 用默认蓝）。
+    pub accent: String,
+    /// 界面缩放比例（0.75–1.5）。
+    pub ui_zoom: f32,
+    /// 复制敏感文本（验证码等）后多少秒自动清空剪贴板（0 = 不自动清空）。
+    pub clip_clear_secs: u32,
+    /// 平时隐藏：不交互时自动收起，只认通知与主动点击。
+    pub auto_hide: bool,
+    /// 平时隐藏时收起后的极简高度（像素）。
+    pub auto_hide_slim: f32,
+    /// 夜间模式：22:30–07:30 把岛身压暗。
+    pub night_mode: bool,
+    /// 会议自动勿扰：检测到会议/投屏进程时不自动弹出与提示音。
+    pub dnd_meeting: bool,
+    /// 悬停预览：收起态悬停胶囊轻微放大预览。
+    pub peek_enabled: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), hotkey_hide: "off".into(), hotkey_minimal: "off".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, sit_remind: true, sit_minutes: 50, leave_delay: 3.0, media_deep: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: false, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true }
+        Self { display_id: String::new(), skin: Skin::Classic, island_shape: IslandShape::Notch, glass_blur: true, island_size: 100, island_offset: 0, dock: Dock::Top, idle_mode: IdleMode::Bar, hotkey_idle: "ctrl_alt_i".into(), hotkey_hide: "off".into(), hotkey_minimal: "off".into(), settings_theme: Default::default(), pet: true, pet_mouth: true, pet_eye_speed: 1.0, sit_remind: true, sit_minutes: 50, leave_delay: 3.0, media_deep: true, minimal: false, browser_minimal: false, avoid_browsers: true, avoid_apps: Vec::new(), visible_pages: [true; 8], page_order: [0,1,2,3,4,5,6,7], show_battery: true, clock_12h: false, clock_period: 0, resident_order: Vec::new(), system_hud: true, bluetooth_notifications: true, read_notifications:false, wechat_notifications:false, wechat_tray_open:false, qq_only:false, notification_preview:false, notifications: true, sound: false, lyrics_enabled:true, island_lyrics:false, lyric_delay_ms:-350, hide_fullscreen: true, focus_minutes: 25, rest_minutes: 5, water_minutes: 45, serving_ml: 250, water_start: 9, water_end: 22, mail_enabled: true, mail_code: true, mail_code_hide: false, mail_code_hide_seconds:60, mail_interval: 120, mail_ics: 15, ignored_mail_events: Vec::new(), calendar_prompt: true, calendar_auto_sync: true, clipboard_history: true, accent: String::new(), ui_zoom: 1.0, clip_clear_secs: 30, auto_hide: false, auto_hide_slim: 4.5, night_mode: true, dnd_meeting: true, peek_enabled: true }
     }
 }
 
@@ -352,7 +368,7 @@ pub fn hotkey(value: &str) -> String {
 impl Settings {
     /// 主窗口（灵动岛）的界面缩放倍率。
     pub fn island_scale(&self) -> f32 {
-        island_size_value(self.island_size) as f32 / 100.0
+        island_size_value(self.island_size) as f32 / 100.0 * self.ui_zoom.clamp(0.75, 1.5)
     }
 
     /// 水平位置，-1..=1。
@@ -451,6 +467,14 @@ impl Settings {
                 "calendar_prompt" => s.calendar_prompt = v != "0",
                 "calendar_auto_sync" => s.calendar_auto_sync = v != "0",
                 "clipboard_history" => s.clipboard_history = v != "0",
+                "accent" => s.accent = if crate::theme::parse_hex(&v).is_some() { v } else { String::new() },
+                "ui_zoom" => s.ui_zoom = v.parse::<f32>().unwrap_or(1.0).clamp(0.75, 1.5),
+                "clip_clear_secs" => s.clip_clear_secs = v.parse().unwrap_or(30).min(300),
+                "auto_hide" => s.auto_hide = v == "1",
+                "auto_hide_slim" => s.auto_hide_slim = v.parse::<f32>().unwrap_or(4.5).clamp(2.0, 20.0),
+                "night_mode" => s.night_mode = v == "1" || v.eq_ignore_ascii_case("true"),
+                "dnd_meeting" => s.dnd_meeting = v == "1" || v.eq_ignore_ascii_case("true"),
+                "peek_enabled" => s.peek_enabled = v == "1" || v.eq_ignore_ascii_case("true"),
                 _ => {}
             }
         }
@@ -520,6 +544,14 @@ impl Settings {
                 ("calendar_prompt".into(), (self.calendar_prompt as u8).to_string()),
                 ("calendar_auto_sync".into(), (self.calendar_auto_sync as u8).to_string()),
                 ("clipboard_history".into(), (self.clipboard_history as u8).to_string()),
+                ("accent".into(), self.accent.clone()),
+                ("ui_zoom".into(), format!("{:.2}", self.ui_zoom)),
+                ("clip_clear_secs".into(), self.clip_clear_secs.to_string()),
+                ("auto_hide".into(), (self.auto_hide as u8).to_string()),
+                ("auto_hide_slim".into(), format!("{:.1}", self.auto_hide_slim)),
+                ("night_mode".into(), if self.night_mode { "1" } else { "0" }.into()),
+                ("dnd_meeting".into(), if self.dnd_meeting { "1" } else { "0" }.into()),
+                ("peek_enabled".into(), if self.peek_enabled { "1" } else { "0" }.into()),
             ],
         );
     }

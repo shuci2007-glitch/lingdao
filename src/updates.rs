@@ -157,7 +157,7 @@ impl State {
                                     ui.label(egui::RichText::new("→").color(theme::DIM));
                                     egui::Frame::new().fill(theme::alpha_blue(0.12)).corner_radius(6.0)
                                         .inner_margin(egui::Margin::symmetric(8,3)).show(ui, |ui| {
-                                            ui.label(egui::RichText::new(&release.version).color(theme::BLUE).font(theme::font(12.0,W::Semibold)));
+                                            ui.label(egui::RichText::new(&release.version).color(theme::accent()).font(theme::font(12.0,W::Semibold)));
                                         });
                                 });
                             });
@@ -184,7 +184,7 @@ impl State {
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new(if self.message.is_empty(){"更新后自动重启，设置和记录会保留。"}else{&self.message}).color(theme::DIM).size(11.5));
                         if self.cancel.is_some() {
-                            ui.add(egui::ProgressBar::new(self.progress).fill(theme::BLUE).desired_height(8.0));
+                            ui.add(egui::ProgressBar::new(self.progress).fill(theme::accent()).desired_height(8.0));
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new(if self.progress==0.0{"正在连接下载服务器…".into()}else if self.progress<1.0{format!("正在下载更新 · {:.0}%",self.progress*100.0)}else{"正在校验安装包…".into()}).color(theme::GRAY));
                                 if ui.button("取消下载").clicked() { self.cancel.as_ref().unwrap().store(true,Ordering::Relaxed); }
@@ -194,7 +194,7 @@ impl State {
                             ui.horizontal(|ui| {
                                 if ui.add_enabled(!installing,egui::Button::new("稍后").fill(theme::BTN).min_size(egui::vec2(110.0,40.0))).clicked() { self.dismiss(); }
                                 let install = egui::Button::new(egui::RichText::new(if installing{"正在准备重启…"}else{"下载并安装"}).color(theme::WHITE))
-                                    .fill(theme::BLUE).min_size(egui::vec2(ui.available_width(),40.0));
+                                    .fill(theme::accent()).min_size(egui::vec2(ui.available_width(),40.0));
                                 if ui.add_enabled(release.package.is_some() && self.rx.is_none(),install).clicked() {
                                     let (tx,rx)=mpsc::channel(); self.rx=Some(rx);
                                     let cancel=Arc::new(AtomicBool::new(false)); self.cancel=Some(cancel.clone());
@@ -209,7 +209,7 @@ impl State {
                         }
                         ui.add_space(2.0);
                         ui.horizontal(|ui| {
-                            ui.hyperlink_to(egui::RichText::new("飞书备用下载").size(11.5).color(theme::BLUE),BACKUP_DOWNLOAD);
+                            ui.hyperlink_to(egui::RichText::new("飞书备用下载").size(11.5).color(theme::accent()),BACKUP_DOWNLOAD);
                             ui.label(egui::RichText::new("·").color(theme::DIM));
                             ui.hyperlink_to(egui::RichText::new("浏览器下载").size(11.5).color(theme::GRAY),&release.page);
                             ui.label(egui::RichText::new("·").color(theme::DIM));

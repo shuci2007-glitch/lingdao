@@ -63,7 +63,7 @@ pub(crate) use crate::pet::PetState;
 
 pub(crate) fn notice_badge(c:&Card,x:f32,y:f32,a:&Alert){
     if a.source==AlertSource::Internal && a.title=="蓝牙设备"{
-        c.circle(x,y,11.0,if a.body.contains("已断开"){Color32::from_gray(95)}else{theme::BLUE});
+        c.circle(x,y,11.0,if a.body.contains("已断开"){Color32::from_gray(95)}else{theme::accent()});
         device_icon(c,a.bluetooth.map_or(crate::bt::DeviceKind::Other,|v|v.0),x-7.5,y-7.5,15.0);
     }else{notice_icon(&c.scaled(x,y,0.85),x,y,a);}
 }
@@ -131,7 +131,7 @@ fn notice_icon(c:&Card,x:f32,y:f32,a:&Alert) {
             }else{c.fill(x-8.0,y-3.5,12.0,7.0,1.0,ink);}
         },
         "喝水时间到了"=>{
-            c.poly(&[(x-7.0,y-1.0),(x+5.0,y-1.0),(x+3.5,y+8.0),(x-5.5,y+8.0)],theme::BLUE);
+            c.poly(&[(x-7.0,y-1.0),(x+5.0,y-1.0),(x+3.5,y+8.0),(x-5.5,y+8.0)],theme::accent());
             c.path(&[(x-9.0,y-10.0),(x-6.5,y+9.0),(x+4.5,y+9.0),(x+7.0,y-10.0)],1.6,theme::CYAN);
             c.seg((x-9.0,y-10.0),(x+7.0,y-10.0),1.6,theme::CYAN);
             c.path(&[(x+6.5,y-6.0),(x+10.5,y-6.0),(x+11.5,y-3.0),(x+10.0,y+2.0),(x+5.5,y+3.0)],1.6,theme::CYAN);
@@ -1345,6 +1345,25 @@ impl App {
                             setting_number(ui,"移开多久收起",&mut self.settings.leave_delay,0.5,10.0," 秒",0.5);
                         });
                         self.avoidance.settings(ui,&mut self.settings);
+                        settings_label(ui,"灵岛增强");
+                        settings_card(ui,|ui|{
+                            setting_row(ui,"夜间模式","22:30–07:30 把岛身压暗，不刺眼",&mut self.settings.night_mode);
+                            setting_row(ui,"会议自动勿扰","检测到会议 / 投屏时不再自动弹出与提示音",&mut self.settings.dnd_meeting);
+                            setting_row(ui,"悬停预览","收起态悬停胶囊轻微放大预览",&mut self.settings.peek_enabled);
+                            setting_row(ui,"平时隐藏","不交互时自动收起，只认通知与主动点击",&mut self.settings.auto_hide);
+                            if self.settings.auto_hide {
+                                setting_number(ui,"收起后高度（像素）",&mut self.settings.auto_hide_slim,2.0_f32,20.0_f32,"",0.5);
+                            }
+                            setting_number(ui,"界面缩放",&mut self.settings.ui_zoom,0.75_f32,1.5_f32,"×",0.05);
+                            setting_number(ui,"验证码自动清空（秒）",&mut self.settings.clip_clear_secs,0,300,"",5.0);
+                            settings_control_row(ui,"强调色",80.0,|ui|{
+                                let r=ui.text_edit_singleline(&mut self.settings.accent);
+                                if !self.settings.accent.is_empty() && crate::theme::parse_hex(&self.settings.accent).is_none() {
+                                    ui.label(egui::RichText::new("格式 #RRGGBB").size(11.0).color(Color32::from_rgb(255,90,90)));
+                                }
+                                r
+                            });
+                        });
                         settings_label(ui,"声音与显示");
                         settings_card(ui,|ui|{
                             setting_row(ui,"提醒声音","喝水、待办和专注提醒",&mut self.settings.sound);

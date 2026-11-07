@@ -287,11 +287,11 @@ impl App {
         let sw = c.hit(160.0, 35.0, 38.0, 22.0, "w-remind");
         let (sh, _) = c.hover_t(&sw);
         let on = self.remind_t.pos;
-        let track = mix(Color32::from_rgb(58, 58, 62), theme::BLUE, on.clamp(0.0, 1.0));
+        let track = mix(Color32::from_rgb(58, 58, 62), theme::accent(), on.clamp(0.0, 1.0));
         c.fill(162.0, 36.0, 34.0, 20.0, 10.0, mix(track, theme::WHITE, sh * 0.08));
         let kx = lerp(172.0, 186.0, on);
         c.circle(kx, 46.0, 8.0, theme::WHITE);
-        paint::bell(&c.scaled(kx, 46.0, 0.9), kx, 46.0, mix(Color32::from_gray(140), theme::BLUE, on.clamp(0.0, 1.0)),0.0);
+        paint::bell(&c.scaled(kx, 46.0, 0.9), kx, 46.0, mix(Color32::from_gray(140), theme::accent(), on.clamp(0.0, 1.0)),0.0);
         if sw.clicked() {
             self.water.remind = !self.water.remind;
             self.water.save();
@@ -302,7 +302,7 @@ impl App {
         // 今天 · 3% · 下次 08:07
         let mut x = 44.0;
         x += c.text(x, 77.0, "今天 · ", size::SMALL, W::Regular, theme::GRAY, H::Left);
-        x += c.text(x, 77.0, &format!("{pct:.0}%"), size::SMALL, W::Bold, theme::BLUE, H::Left);
+        x += c.text(x, 77.0, &format!("{pct:.0}%"), size::SMALL, W::Bold, theme::accent(), H::Left);
         if self.water.percent()>=100.0 {
             c.text(x,77.0," · 已达标",size::SMALL,W::Regular,theme::GRAY,H::Left);
         } else if self.water.remind && self.water_hours(env.hour() as u32) {
@@ -311,7 +311,7 @@ impl App {
         c.fill(44.0, 84.0, 151.0, 3.5, 1.75, Color32::from_rgb(34, 34, 37));
         let f = self.water_ring.pos.clamp(0.0, 1.0);
         if f > 0.0 {
-            c.fill(44.0, 84.0, (151.0 * f).max(3.5), 3.5, 1.75, theme::BLUE);
+            c.fill(44.0, 84.0, (151.0 * f).max(3.5), 3.5, 1.75, theme::accent());
         }
 
         let (d, dc) = capsule(c, 43.0, 98.0, 62.0, 25.0, "w-drink", theme::BLUE_DEEP, Color32::from_rgb(22, 92, 165));
@@ -372,11 +372,11 @@ impl App {
         c.circle(cx + r * (start + sweep).cos(), cy + r * (start + sweep).sin(), thick * 0.5, theme::WATER_TRACK);
         let end = start + sweep * frac;
         if frac > 0.002 {
-            c.arc(cx, cy, r, start, end, thick, theme::BLUE);
+            c.arc(cx, cy, r, start, end, thick, theme::accent());
         }
-        c.circle(cx + r * start.cos(), cy + r * start.sin(), thick * 0.55, theme::BLUE);
+        c.circle(cx + r * start.cos(), cy + r * start.sin(), thick * 0.55, theme::accent());
         if frac > 0.002 {
-            c.circle(cx + r * end.cos(), cy + r * end.sin(), thick * 0.5, theme::BLUE);
+            c.circle(cx + r * end.cos(), cy + r * end.sin(), thick * 0.5, theme::accent());
         }
     }
 
@@ -407,10 +407,10 @@ impl App {
             let v = self.water.hours.get(hr).copied().unwrap_or(0) as f32;
             if v > 0.0 {
                 let hgt = (full * (v / scale)).max(5.6) * rise;
-                let col = if hr == hour { theme::BLUE } else { Color32::from_rgb(40, 120, 190) };
+                let col = if hr == hour { theme::accent() } else { Color32::from_rgb(40, 120, 190) };
                 c.fill(x, bottom - hgt, 5.6, hgt, 2.8, col);
             } else if hr == hour {
-                c.circle(x + 2.8, bottom - 2.8, 2.8 * rise, theme::BLUE);
+                c.circle(x + 2.8, bottom - 2.8, 2.8 * rise, theme::accent());
             }
             if hr % 3 == 0 {
                 c.text(x + 2.8, 117.0, &format!("{hr:02}"), size::TINY, W::Regular, theme::GRAY, H::Center);
@@ -639,7 +639,7 @@ impl App {
                 c.fill(48.0, y - 10.0, 323.0, 20.0, 7.0, Color32::from_white_alpha((12.0 * h) as u8));
             }
             if clip.pinned {
-                paint::pin(c, 58.0, y, 9.0, theme::BLUE);
+                paint::pin(c, 58.0, y, 9.0, theme::accent());
             } else {
                 c.circle(58.0, y, 2.2, Color32::from_gray(110));
             }
@@ -649,7 +649,7 @@ impl App {
             let tip: String = clip.text.chars().take(400).collect();
             let r = r.on_hover_text(format!("{tip}{}\n点击复制", if clip.text.chars().count() > 400 { "…" } else { "" }));
             let pin = c.hit(323.0, y - 9.0, 18.0, 18.0, ("clip-pin", index)).on_hover_text(if clip.pinned { "取消固定" } else { "固定（清空时保留）" });
-            paint::pin(c, 332.0, y, 9.0, if clip.pinned || pin.hovered() { theme::BLUE } else { theme::GRAY });
+            paint::pin(c, 332.0, y, 9.0, if clip.pinned || pin.hovered() { theme::accent() } else { theme::GRAY });
             let delete = c.hit(345.0, y - 9.0, 17.0, 18.0, ("clip-delete", index)).on_hover_text("删除这条记录");
             paint::close(c, 353.5, y, 2.4, theme::GRAY);
             if delete.clicked() { action = Some((index, 2)); }
@@ -731,11 +731,11 @@ impl App {
                 // 输入行（文本框本身由 app::input_field 放置）
                 let y = row_y(0);
                 c.fill(203.0, y - 10.0, 167.0, 20.0, 7.0, Color32::from_rgb(34, 34, 38));
-                c.stroke(203.0, y - 10.0, 167.0, 20.0, 7.0, 1.0, paint::alpha(theme::BLUE, 0.7));
+                c.stroke(203.0, y - 10.0, 167.0, 20.0, 7.0, 1.0, paint::alpha(theme::accent(), 0.7));
                 if self.editing.is_some() {
-                    paint::pencil(c, 212.0, y, 9.0, theme::BLUE);
+                    paint::pencil(c, 212.0, y, 9.0, theme::accent());
                 } else {
-                    paint::plus(c, 212.0, y, 5.0, theme::BLUE, Color32::BLACK);
+                    paint::plus(c, 212.0, y, 5.0, theme::accent(), Color32::BLACK);
                 }
                 row = 1;
             }
@@ -774,7 +774,7 @@ impl App {
                 let tcol = mix(Color32::from_gray(235), Color32::from_gray(110), ct);
                 let tw = rc.text(223.0, y + 3.8, &text, size::BODY, W::Regular, tcol, H::Left);
                 if !tag.is_empty() {
-                    rc.text(223.0 + tw + 5.0, y + 3.2, &tag, size::TINY, W::Regular, if today_item { theme::BLUE } else { theme::GRAY }, H::Left);
+                    rc.text(223.0 + tw + 5.0, y + 3.2, &tag, size::TINY, W::Regular, if today_item { theme::accent() } else { theme::GRAY }, H::Left);
                 }
                 if ct > 0.0 {
                     c.fill(223.0, y + 0.2, tw * smoothstep(0.2, 1.0, ct), 1.0, 0.5, Color32::from_gray(110));
@@ -783,7 +783,7 @@ impl App {
                 paint::close(c,361.5,y,2.4,theme::GRAY);
                 let reminder=c.hit(333.0,y-9.0,18.0,18.0,("todo-reminder",i)).on_hover_text(item.reminder_text().map(|due|format!("提醒：{due} · 点击修改")).unwrap_or_else(||"设置提醒与每周重复（可选）".into()));
                 let reminder_clicked=reminder.clicked();
-                let ink=if item.due.is_some()||reminder.hovered(){theme::BLUE}else{theme::GRAY};
+                let ink=if item.due.is_some()||reminder.hovered(){theme::accent()}else{theme::GRAY};
                 c.ring(342.0,y,4.7,1.1,ink);
                 c.path(&[(342.0,y-2.5),(342.0,y),(344.3,y+1.0)],1.1,ink);
                 if reminder_clicked {self.open_task_reminder(i);}
@@ -967,7 +967,7 @@ impl App {
         let from = c.fit(&item.from, 11.5, W::Semibold, 210.0);
         c.text(46.0, 50.0, &from, 11.5, W::Semibold, theme::WHITE, H::Left);
         let read=c.hit(266.0,42.0,60.0,14.0,("mail-read",&item.account,item.uid)).on_hover_text("在独立窗口阅读完整正文");
-        c.text(324.0,50.0,"阅读全文",10.5,W::Regular,if read.hovered(){theme::BLUE}else{theme::GRAY},H::Right);
+        c.text(324.0,50.0,"阅读全文",10.5,W::Regular,if read.hovered(){theme::accent()}else{theme::GRAY},H::Right);
         if read.clicked(){self.mail.reading=Some(raw.clone());self.mail.reader_focus=true;}
         let subject = c.fit(&item.subject, 13.5, W::Semibold, 328.0);
         c.text(46.0, 73.0, &subject, 13.5, W::Semibold, theme::WHITE, H::Left);
@@ -994,7 +994,7 @@ impl App {
             }
             for link in &item.links {
                 let text=format!("{} ↗",c.fit(&link.label,12.0,W::Regular,295.0));
-                if ui.add(egui::Link::new(egui::RichText::new(text).font(c.font(12.0,W::Regular)).color(theme::BLUE))).on_hover_text(&link.url).clicked(){
+                if ui.add(egui::Link::new(egui::RichText::new(text).font(c.font(12.0,W::Regular)).color(theme::accent()))).on_hover_text(&link.url).clicked(){
                     cmds.push(Cmd::OpenUrl(link.url.clone()));
                 }
             }
@@ -1005,7 +1005,7 @@ impl App {
         let y = 214.0;
         if hidden {
             c.text(46.0,y,"验证码已隐藏（不代表失效）",11.0,W::Regular,theme::GRAY,H::Left);
-            c.text(374.0,y,"查看 15 秒",10.5,W::Regular,theme::BLUE,H::Right);
+            c.text(374.0,y,"查看 15 秒",10.5,W::Regular,theme::accent(),H::Right);
             if c.hit(290.0,y-14.0,86.0,24.0,("mail-reveal",item.uid)).clicked(){self.reveal_mail_code(raw);}
         } else if let Some(m) = &item.meeting {
             let ignored=self.mail_event_ignored(m);

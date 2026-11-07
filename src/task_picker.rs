@@ -89,7 +89,7 @@ impl ReminderPicker {
             }
         }
         let note=self.repeat_note.as_deref();
-        let (label,color)=if !self.error.is_empty(){(self.error.as_str(),theme::RED)}else if let Some(note)=note.filter(|n|!n.is_empty()){(note,theme::BLUE)}else{("已完成",theme::GRAY)};
+        let (label,color)=if !self.error.is_empty(){(self.error.as_str(),theme::RED)}else if let Some(note)=note.filter(|n|!n.is_empty()){(note,theme::accent())}else{("已完成",theme::GRAY)};
         let w=c.text(42.0,79.0,label,9.0,W::Regular,color,H::Left);
         if self.error.is_empty() && note==Some(""){c.text(42.0+w+4.0,79.0,"· 下方可设每周重复",9.0,W::Regular,theme::DIM,H::Left);}
         let (skip,b)=capsule(c,41.0,105.0,100.0,22.0,"task-reminder-skip",theme::BTN,theme::BTN_HOVER);

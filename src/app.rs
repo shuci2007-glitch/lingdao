@@ -726,6 +726,16 @@ pub struct App {
     pub(crate) dt: f32,
     pub(crate) today: String,
     pub(crate) current_hour: usize,
+    pub(crate) current_minute: u32,
+    /// 夜间压暗进度（0 白天，1 深夜），平滑过渡。
+    night: f32,
+    /// 会议/投屏勿扰：当前是否处于勿扰态（按 ~1.5s 缓存）。
+    dnd_now: bool,
+    dnd_checked_at: f64,
+    dnd_cache: bool,
+    /// 悬停预览：收起态悬停胶囊的轻微放大进度（0–1）。
+    peek: Spring,
+    peek_since: Option<f64>,
     pub(crate) cursor_local: Option<Pos2>,
     started: bool,
     /// v0.5.4：音量条展示值（拖动时先用本地值，随后跟上系统回报）。
@@ -755,7 +765,7 @@ impl App {
         ctx.set_visuals(egui::Visuals::dark());
         ctx.style_mut(|s| {
             s.interaction.selectable_labels = false;
-            s.visuals.text_cursor.stroke = egui::Stroke::new(1.5_f32, theme::BLUE);
+            s.visuals.text_cursor.stroke = egui::Stroke::new(1.5_f32, theme::accent());
             s.visuals.selection.bg_fill = theme::alpha_blue(0.45);
         });
         let settings = model::Settings::load();
@@ -840,7 +850,7 @@ impl App {
             last_t: None,
             t: 0.0,
             dt: 0.0,
-            today: String::new(), current_hour: 0,
+            today: String::new(), current_hour: 0, current_minute: 0, night: 0.0, dnd_now: false, dnd_checked_at: 0.0, dnd_cache: false, peek: Spring::new(0.0, 320.0, 0.78), peek_since: None,
             cursor_local: None,
             started: false,
             volume_ui: None,
@@ -1534,6 +1544,42 @@ impl App {
         if self.page==CALENDAR_PAGE {CALENDAR_H}else if self.page==5&&self.mail.open_uid.is_some(){236.0}else{PH}
     }
 
+    /// 会议 / 投屏勿扰：仅 Windows 下检测常见会议软件进程。
+    /// 进程枚举有开销，按 ~1.5s 缓存一次结果，避免每帧扫全进程表。
+    fn dnd_active(&mut self, t: f64) -> bool {
+        if !self.settings.dnd_meeting {
+            self.dnd_cache = false;
+            return false;
+        }
+        if t - self.dnd_checked_at > 1.5 {
+            self.dnd_checked_at = t;
+            #[cfg(windows)]
+            { self.dnd_cache = crate::system::meeting_running(); }
+            #[cfg(not(windows))]
+            { self.dnd_cache = false; }
+        }
+        self.dnd_cache
+    }
+
+    /// 由本地时间平滑得到的夜间系数（0 白天，1 深夜）。22:30 后渐入，07:30 前渐出。
+    fn night_target(&self) -> f32 {
+        if !self.settings.night_mode { return 0.0; }
+        let h = self.current_hour;
+        let m = self.current_minute as f32 / 60.0;
+        let t = h as f32 + m; // 0..24
+        let up = 7.5;   // 07:30 亮
+        let down = 22.5; // 22:30 暗
+        if t >= up && t <= down {
+            0.0
+        } else if t > down {
+            smoothstep(down, down + 1.0, t)
+        } else {
+            // 0..up：0:00 最暗(1)，07:30 渐亮到 0（与「22:30 后渐暗」对称）。
+            let v = smoothstep(up - 1.0, up, t);
+            1.0 - v
+        }
+    }
+
     // ---------------------------------------------------------------
     // 每帧入口
     // ---------------------------------------------------------------
@@ -1548,6 +1594,7 @@ impl App {
         self.t = env.t;
         self.quota_tick();
         self.current_hour=env.hour();
+        self.current_minute=env.minute();
         self.system_idle=env.idle_seconds;
         self.dt = dt;
         if let Some(at_top)=env.browser_at_top {self.browser_at_top=at_top;}
@@ -1716,7 +1763,28 @@ impl App {
                 }
             }
         } else {self.wheel_delta=0.0;}
-        let want = (inside && !self.hover_lock && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || (self.is_editing() && self.open);
+        // 会议/投屏勿扰：当前是否处于勿扰态。
+        self.dnd_now = self.dnd_active(self.t);
+        // 悬停预览：收起态悬停胶囊 300ms 后轻微放大（仅在收起态生效）。
+        let hovering = inside || self.near_top_now;
+        if !self.open && self.settings.peek_enabled && hovering {
+            let since = *self.peek_since.get_or_insert(self.t);
+            if self.t - since >= 0.3 { self.peek.target = 1.0; }
+        } else {
+            self.peek_since = None;
+            self.peek.target = 0.0;
+        }
+        self.peek.step(dt);
+        // 夜间系数平滑过渡。
+        self.night = anim::approach(self.night, self.night_target(), 4.0, dt);
+        // 平时隐藏：收起态鼠标扫过不展开，只认通知到期时间（forced_open_until）与主动点击；
+        // 完全隐入 / 圆点（空闲形态）贴顶冒头属于用户主动靠近，即便开了平时隐藏也允许悬停展开。
+        // 会议 / 投屏勿扰时不自动弹出，只留小圆。
+        let idle_popup = matches!(self.settings.idle_mode, model::IdleMode::Hidden | model::IdleMode::Drop)
+            && self.near_top_now
+            && !self.open;
+        let hover_opens = (!self.settings.auto_hide || self.t < self.forced_open_until || idle_popup) && !self.dnd_now;
+        let want = (inside && !self.hover_lock && hover_opens && (self.compact_notices()||self.notice.is_none()||self.open)) || self.open && on_notice || (self.open && self.t<self.forced_open_until) || self.drag_hot || (self.is_editing() && self.open);
         self.morph(want, inside, env.t, dt);
         // 「水滴」：岛先收成正圆小黑丸（宽度收到圆点量级即算落定），随后 idle_drop 0→1
         // 把它向上吸进屏顶；光标贴顶时回落，保持可见供交互。
@@ -1744,8 +1812,8 @@ impl App {
         if self.idle_splash > 0.0 {
             self.idle_splash = (self.idle_splash - dt / 0.9).max(0.0);
         }
-        // 展开瞬间：播放「啵」一声（受提醒声音开关控制）。
-        if self.open && !self.was_open && self.settings.sound {
+        // 展开瞬间：播放「啵」一声（受提醒声音开关控制；会议勿扰时不响）。
+        if self.open && !self.was_open && self.settings.sound && !self.dnd_now {
             crate::sfx::play(crate::sfx::Sfx::Boop);
         }
         self.was_open = self.open;
@@ -1767,6 +1835,13 @@ impl App {
         let painter = ui.painter_at(ui.max_rect().expand(40.0));
         let feather = 1.0 / ctx.pixels_per_point();
         let body=messenger_rect.filter(|_|outside_badge.is_none()).map_or(panel,|badge|panel.union(badge));
+        // 悬停预览：收起态把胶囊视觉上轻微放大（仅视觉，不影响内容布局与命中）。
+        let vbody = if !self.open && !drop_visual {
+            let s = 1.0 + 0.06 * self.peek.pos;
+            Rect::from_center_size(body.center(), body.size() * s)
+        } else {
+            body
+        };
         let flare = if minimal_pill || pill { 0.0 } else { lerp(5.0, FLARE, pc) };
         let k = (w / PW).clamp(0.3, 1.1);
         let thickness = if side { crate::side_dock::SIDE_BAR_W } else { BAR_H };
@@ -1782,7 +1857,7 @@ impl App {
         let skin_shadow = if !glass_skin {1.0} else if env.glass_blur {0.75} else {0.7};
         let shadow_k = glass::shadow_alpha(0.0, thick) / 0.12 * skin_shadow;
         let island_shadow=|r:Rect,flare:f32,flare_h:f32,radius:f32,strength:f32| if pill {pill_shadow(&painter,r,radius,strength)} else if side {shape::shadow_docked(&painter,r,dock,flare,flare_h,radius,strength)} else {shape::shadow(&painter,r,flare,flare_h,radius,strength)};
-        if !drop_visual { island_shadow(body, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k); }
+        if !drop_visual { island_shadow(vbody, flare, flare_h, radius, smoothstep(0.1, 0.9, pc) * shadow_k); }
         let notice_rect=self.notice_rect(cx,top);
         let notice_shape=notice_rect.map(|r|Rect::from_min_max(Pos2::new(r.left()-36.0,r.top()),r.max));
         if let Some(r)=notice_shape {island_shadow(r,5.0,8.0,12.5,0.5*shadow_k);}
@@ -1809,7 +1884,7 @@ impl App {
         if drop_visual {
             Self::paint_drop(&painter, cx, top, w, h, de, self.idle_splash, self.glass_fill());
         } else {
-            self.paint_body(&painter, body, flare, flare_h, radius, feather);
+            self.paint_body(&painter, vbody, flare, flare_h, radius, feather);
         }
         if let Some(r)=notice_shape {self.paint_body(&painter,r,5.0,8.0,12.5,feather);}
         let content_from=crate::skin_paint::shape_count(&ctx,layer);
@@ -2007,6 +2082,14 @@ impl App {
         // 交互形变保持 60 帧，媒体 30 帧；小表情 20 帧，睡眠 10 帧，涟漪 60 帧，静态界面每秒核对提醒。
         let repaint_after=std::time::Duration::from_secs_f64(if transitioning{1.0/60.0}else if splashing{1.0/60.0}else if ambient{1.0/30.0}else if pet_visible{if self.pet.state==PetState::Sleeping{0.1}else{0.05}}else if self.idle_hidden(){0.1}else{1.0});
         cmds.append(&mut self.pending);
+        // 夜间变暗：深夜把岛身压暗，不刺眼。绘制在所有内容之上。
+        if self.night > 0.003 {
+            let a = (self.night * 0.45 * 255.0) as u8;
+            let mut nrect = self.island_rect(win, self.w.pos, self.h.pos);
+            if let Some(r) = notice_rect { nrect = nrect.union(r); }
+            let npainter = ui.painter_at(ui.max_rect().expand(40.0));
+            npainter.rect_filled(nrect, radius, Color32::from_black_alpha(a));
+        }
         FrameOut {
             region: rel(floating_toast.into_iter().chain(self.shelf_menu_rect.map(|r|r.union(r + ctx.style().visuals.popup_shadow.margin()).expand(1.0 / ctx.pixels_per_point()))).fold(region,Rect::union).intersect(ui.max_rect())),
             glass: glass_region,
@@ -2408,7 +2491,13 @@ impl App {
                 self.w.tune(CLOSE.0, CLOSE.1);
                 self.h.tune(CLOSE.0, CLOSE.1);
                 self.w.target = bw;
-                self.h.target = bh;
+                // 平时隐藏：空闲一会儿后把岛收成极简细条，只留一条；通知 / 主动点击仍会展开。
+                let idle_long = self.idle_for() > 3.0;
+                self.h.target = if self.settings.auto_hide && idle_long {
+                    self.settings.auto_hide_slim.clamp(2.0, 20.0)
+                } else {
+                    bh
+                };
             }
         }
         let _ = inside;
@@ -2417,7 +2506,8 @@ impl App {
         self.w.step(dt);
         self.h.step(dt);
         // 仅在从外侧越过目标时收住，扩展提示条时不强制跳到目标宽度。
-        if !self.open {
+        // 平时隐藏把目标高度降到极简细条时，不在此处回弹到 bh，否则会卡在正常高度缩不下去。
+        if !self.open && self.h.target >= bh && self.w.target >= bw {
             if prev_w>=bw && self.w.pos<bw {self.w.snap(bw);}
             if prev_h>=bh && self.h.pos<bh {self.h.snap(bh);}
         }
@@ -2613,7 +2703,7 @@ impl App {
         let (a, b, col) = match page {
             0 | CALENDAR_PAGE => return,
             1 => ("番茄", "专注", theme::RED_TOP),
-            2 => ("饮水", "提醒", theme::BLUE),
+            2 => ("饮水", "提醒", theme::accent()),
             // 置物架的标题就是「置物架 | 剪贴板」分栏，由页面自己画。
             3 => return,
             4 => ("待办", "清单", theme::GREEN),
